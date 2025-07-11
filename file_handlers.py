@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pydicom
+from scipy.interpolate import griddata
 from utils import logger
 
 class BaseFileHandler:
@@ -241,7 +242,37 @@ class MCCFileHandler(BaseFileHandler):
                 
     def get_matrix_data(self):
         """매트릭스 데이터 반환"""
-        return self.matrix_data        
+        return self.matrix_data
+
+    def get_interpolated_matrix_data(self, method='cubic'):
+        """2D 보간으로 매트릭스 데이터의 빈 영역 채우기"""
+        if self.matrix_data is None:
+            return None
+
+        # -1 값을 NaN으로 변경하여 비어있는 데이터 표시
+        data = self.matrix_data.copy()
+        data[data < 0] = np.nan
+
+        # 유효한 데이터 포인트의 인덱스 가져오기
+        valid_points_indices = np.where(~np.isnan(data))
+        valid_points_values = data[valid_points_indices]
+
+        if len(valid_points_values) < 4:
+            # 보간을 수행하기에 데이터 포인트가 충분하지 않음
+            return self.matrix_data 
+
+        # 전체 그리드 생성
+        grid_y, grid_x = np.mgrid[0:data.shape[0], 0:data.shape[1]]
+
+        # griddata를 사용하여 보간 수행
+        interpolated_data = griddata(
+            np.array(list(zip(valid_points_indices[0], valid_points_indices[1]))),
+            valid_points_values,
+            (grid_y, grid_x),
+            method=method
+        )
+        
+        return interpolated_data        
     
     def open_file(self, filename):
         """MCC 파일 로드 및 분석"""

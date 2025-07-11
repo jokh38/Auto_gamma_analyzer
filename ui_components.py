@@ -56,8 +56,8 @@ class ProfileDataTable(QTableWidget):
             # 측정 값이 없으면 모든 포인트 표시
             self.setRowCount(len(positions))
             for i, (pos, dose) in enumerate(zip(positions, dose_values)):
-                self.setItem(i, 0, QTableWidgetItem(f"{pos:.2f}"))
-                self.setItem(i, 1, QTableWidgetItem(f"{dose:.3f}"))
+                self.setItem(i, 0, QTableWidgetItem(f"{pos:.1f}"))
+                self.setItem(i, 1, QTableWidgetItem(f"{dose:.1f}"))
                 self.setItem(i, 2, QTableWidgetItem("N/A"))
         else:
             # 유효한 MCC 측정 값만 표시(NaN 아닌 값)
@@ -70,9 +70,9 @@ class ProfileDataTable(QTableWidget):
             self.setRowCount(len(valid_positions))
             
             for i, (pos, dose, meas) in enumerate(zip(valid_positions, valid_dose_values, valid_measurements)):
-                self.setItem(i, 0, QTableWidgetItem(f"{pos:.2f}"))
-                self.setItem(i, 1, QTableWidgetItem(f"{dose:.3f}"))
-                self.setItem(i, 2, QTableWidgetItem(f"{meas:.3f}"))
+                self.setItem(i, 0, QTableWidgetItem(f"{pos:.1f}"))
+                self.setItem(i, 1, QTableWidgetItem(f"{dose:.1f}"))
+                self.setItem(i, 2, QTableWidgetItem(f"{meas:.1f}"))
 
 
 def draw_image(canvas, image_data, extent, title, colorbar_label=None, 
@@ -125,8 +125,6 @@ def draw_image(canvas, image_data, extent, title, colorbar_label=None,
             canvas.axes.axhline(y=line["y"], color='white', linestyle='-', linewidth=2)
     
     # 축 레이블 및 제목 설정
-    canvas.axes.set_xlabel('X Position (mm)')
-    canvas.axes.set_ylabel('Y Position (mm)')
     canvas.axes.set_title(title)
     
     # 레이아웃 조정 및 그리기
