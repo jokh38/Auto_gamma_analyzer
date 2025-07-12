@@ -49,6 +49,12 @@ class GammaAnalysisApp(QMainWindow):
         # 파일 로드 버튼
         self.load_dicom_btn = QPushButton("Load DICOM RT Dose")
         self.load_mcc_btn = QPushButton("Load MCC File")
+
+        # 파일 로드 그룹
+        file_group = QGroupBox("File")
+        file_layout = QVBoxLayout(file_group)
+        file_layout.addWidget(self.load_dicom_btn)
+        file_layout.addWidget(self.load_mcc_btn)
         
         # 장비 정보 표시
         device_group = QGroupBox("Device Info")
@@ -75,7 +81,7 @@ class GammaAnalysisApp(QMainWindow):
         
         # 프로파일 방향 선택 컨트롤
         profile_dir_group = QGroupBox("Profile Direction")
-        profile_dir_layout = QHBoxLayout(profile_dir_group)
+        profile_dir_layout = QVBoxLayout(profile_dir_group)
         self.vertical_btn = QPushButton("Vertical")
         self.horizontal_btn = QPushButton("Horizontal")
         self.vertical_btn.setCheckable(True)
@@ -116,16 +122,20 @@ class GammaAnalysisApp(QMainWindow):
         
         # 리포트 버튼
         self.generate_report_btn = QPushButton("Generate Report")
+
+        # 실행/리포트 그룹
+        run_report_group = QGroupBox("Execute")
+        run_report_layout = QVBoxLayout(run_report_group)
+        run_report_layout.addWidget(self.run_gamma_btn)
+        run_report_layout.addWidget(self.generate_report_btn)
         
         # 컨트롤 추가
-        control_layout.addWidget(self.load_dicom_btn, 0, 0)
-        control_layout.addWidget(self.load_mcc_btn, 0, 1)
+        control_layout.addWidget(file_group, 0, 1)
         control_layout.addWidget(device_group, 0, 2)
         control_layout.addWidget(origin_group, 0, 3)
         control_layout.addWidget(profile_dir_group, 0, 4)
         control_layout.addWidget(gamma_group, 0, 5)
-        control_layout.addWidget(self.run_gamma_btn, 0, 6)
-        control_layout.addWidget(self.generate_report_btn, 0, 7)
+        control_layout.addWidget(run_report_group, 0, 6)
         
         # 메인 레이아웃에 컨트롤 패널 추가
         main_layout.addWidget(control_panel)
@@ -366,9 +376,14 @@ class GammaAnalysisApp(QMainWindow):
             self.vertical_btn.setChecked(False)
             self.horizontal_btn.setChecked(True)
             
-        self.profile_line = None
+        # (0,0)을 지나는 프로파일을 자동으로 선택
         if self.dicom_image is not None:
+            if self.profile_direction == "vertical":
+                self.profile_line = {"type": "vertical", "x": 0}
+            else:
+                self.profile_line = {"type": "horizontal", "y": 0}
             self.redraw_all_images()
+            self.generate_profile()
     
     def on_dicom_click(self, event):
         """클릭 시 중심을 통과하는 수직/수평선 생성 - 물리적 좌표 사용"""

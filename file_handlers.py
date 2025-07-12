@@ -411,29 +411,29 @@ class MCCFileHandler(BaseFileHandler):
         return self.mcc_spacing_x, self.mcc_spacing_y
 
     def create_physical_coordinates(self):
-        """물리적 좌표계 생성"""
+        """물리적 좌표계 생성 (지정된 원점 인덱스를 0,0으로)"""
         if self.matrix_data is None:
             return
-            
+
         height, width = self.matrix_data.shape
-        
-        # 물리적 좌표계 생성 (meshgrid 사용)
-        phys_x = np.linspace(
-            -self.mcc_origin_x * self.mcc_spacing_x,
-            (width - self.mcc_origin_x) * self.mcc_spacing_x,
-            width
-        )
-        
-        phys_y = np.linspace(
-            (self.mcc_origin_y - height) * self.mcc_spacing_y,
-            self.mcc_origin_y * self.mcc_spacing_y,
-            height
-        )
-        
-        # Meshgrid 생성
+
+        # 0-기반 중심 인덱스 계산 (origin 값은 1-기반)
+        center_index_x = self.mcc_origin_x - 1
+        center_index_y = self.mcc_origin_y - 1
+
+        # 중심 인덱스를 기준으로 물리적 좌표의 시작점과 끝점 계산
+        x_start = -center_index_x * self.mcc_spacing_x
+        x_end = (width - 1 - center_index_x) * self.mcc_spacing_x
+
+        y_start = -center_index_y * self.mcc_spacing_y
+        y_end = (height - 1 - center_index_y) * self.mcc_spacing_y
+
+        # 물리적 좌표 생성
+        phys_x = np.linspace(x_start, x_end, width)
+        phys_y = np.linspace(y_start, y_end, height)
+
+        # Meshgrid 생성 및 물리적 범위 저장
         self.phys_x_mesh, self.phys_y_mesh = np.meshgrid(phys_x, phys_y)
-        
-        # 물리적 범위 계산
         self.physical_extent = [phys_x.min(), phys_x.max(), phys_y.min(), phys_y.max()]
             
     def physical_to_pixel_coord(self, phys_x, phys_y):
