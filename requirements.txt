@@ -2,5 +2,5 @@ numpy
 matplotlib
 PyQt5
 pydicom
-pymedphys
+
 scipy

@@ -1,5 +1,6 @@
+
 import numpy as np
-import pymedphys
+from scipy.interpolate import interpn
 from utils import logger, find_nearest_index
 
 def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=None):
@@ -152,128 +153,110 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
         # 오류 발생 시 기본 데이터만 반환
         return profile_data
 
-
 def perform_gamma_analysis(reference_handler, evaluation_handler, 
                           dose_percent_threshold, distance_mm_threshold, 
-                          global_normalisation=True, threshold=10, max_gamma=3.0):
+                          global_normalisation=True, threshold=10, max_gamma=None):
     """
-    pymedphys를 사용하여 감마 분석을 수행하는 함수.
-    MCC 측정 포인트를 참조로, 해당 위치의 DICOM 값을 평가 대상으로 사용합니다.
-    
-    Args:
-        reference_handler: 참조 데이터 핸들러 (MCC)
-        evaluation_handler: 평가 데이터 핸들러 (DICOM)
-        dose_percent_threshold: DD 임계값 (%)
-        distance_mm_threshold: DTA 임계값 (mm)
-        global_normalisation: 전역 정규화 사용 여부
-        threshold: 최대값의 %로 표현되는 선량 임계값
-        max_gamma: 최대 감마 값
-        
-    Returns:
-        (gamma_map, 통계 정보 딕셔너리, 물리적 범위)
+    수동 DTA 검색 방식을 사용하여 감마 분석을 수행합니다.
+    - 기준: MCC의 각 유효 측정점
+    - 대상: DICOM의 조밀한 그리드
+    - 방식: 각 MCC 점을 기준으로 DTA 반경 내 모든 DICOM 점을 검색하여
+            선량 차이가 최소인 점을 찾아 감마를 계산합니다.
     """
     try:
-        # 1. 참조 데이터 (MCC) 준비
-        mcc_data = reference_handler.get_matrix_data()
-        if mcc_data is None:
+        # 1. 데이터 준비 및 좌표 정렬
+        # 1-1. MCC 유효 측정점 추출
+        mcc_dose_data = reference_handler.get_matrix_data()
+        if mcc_dose_data is None:
             raise ValueError("MCC 데이터를 찾을 수 없습니다.")
+            
+        valid_indices = np.where(mcc_dose_data >= 0)
+        coords_ref_phys = np.array([reference_handler.pixel_to_physical_coord(px, py) for py, px in np.vstack(valid_indices).T])
+        dose_ref_points = mcc_dose_data[valid_indices]
+        phys_extent = reference_handler.get_physical_extent()
 
-        # 2. 평가 데이터 (DICOM) 준비
-        dicom_data = evaluation_handler.get_pixel_data()
-        if dicom_data is None:
+        if dose_ref_points.size == 0:
+            raise ValueError("MCC 파일에 유효한 측정 데이터가 없습니다.")
+
+        # 1-2. DICOM 데이터 준비
+        dicom_dose_data = evaluation_handler.get_pixel_data()
+        if dicom_dose_data is None:
             raise ValueError("DICOM 데이터를 찾을 수 없습니다.")
 
-        # 3. 유효한 MCC 포인트에서 참조 및 평가 데이터 추출
-        valid_mcc_mask = mcc_data >= 0
+        # 1-3. 최대 선량점 기준 좌표 정렬
+        max_dose_idx_mcc = np.argmax(dose_ref_points)
+        max_dose_phys_coord_mcc = coords_ref_phys[max_dose_idx_mcc]
         
-        # MCC 측정 포인트의 물리적 좌표 추출
-        mcc_coords_y = reference_handler.phys_y_mesh[valid_mcc_mask].ravel()
-        mcc_coords_x = reference_handler.phys_x_mesh[valid_mcc_mask].ravel()
-        dose_reference = mcc_data[valid_mcc_mask].ravel()
+        max_dose_pixel_idx_dicom = np.unravel_index(np.argmax(dicom_dose_data), dicom_dose_data.shape)
+        max_dose_phys_coord_dicom = evaluation_handler.pixel_to_physical_coord(max_dose_pixel_idx_dicom[1], max_dose_pixel_idx_dicom[0])
 
-        # 4. 동일한 물리적 위치에서 DICOM 값 추출 (보간 사용)
-        from scipy.interpolate import griddata
-        
-        # DICOM 그리드의 물리적 좌표
-        dicom_y_coords = evaluation_handler.phys_y_mesh[:, 0]
-        dicom_x_coords = evaluation_handler.phys_x_mesh[0, :]
-        
-        # DICOM 그리드 좌표를 1D 배열로 변환
-        dicom_y_flat, dicom_x_flat = np.meshgrid(dicom_y_coords, dicom_x_coords, indexing='ij')
-        dicom_y_flat = dicom_y_flat.ravel()
-        dicom_x_flat = dicom_x_flat.ravel()
-        dicom_dose_flat = dicom_data.ravel()
-        
-        # MCC 위치에서 DICOM 값 보간
-        mcc_points = np.column_stack([mcc_coords_y, mcc_coords_x])
-        dicom_points = np.column_stack([dicom_y_flat, dicom_x_flat])
-        
-        dose_evaluation = griddata(
-            dicom_points, dicom_dose_flat, mcc_points, 
-            method='linear', fill_value=0.0
-        )
+        shift = np.array(max_dose_phys_coord_dicom) - np.array(max_dose_phys_coord_mcc)
+        coords_ref_phys_shifted = coords_ref_phys + shift
+        logger.info(f"좌표 정렬 완료 (이동량: dx={shift[0]:.2f}, dy={shift[1]:.2f} mm)")
 
-        # 5. 1D 감마 분석 수행 (동일한 측정 점에서 비교)
-        # 거리 기반 좌표 생성 (원점으로부터의 거리)
-        distances = np.sqrt(mcc_coords_y**2 + mcc_coords_x**2)
-        
-        # 정렬된 인덱스 생성
-        sorted_indices = np.argsort(distances)
-        
-        axes_reference = distances[sorted_indices]
-        dose_ref_sorted = dose_reference[sorted_indices]
-        dose_eval_sorted = dose_evaluation[sorted_indices]
+        # 2. 감마 계산
+        gamma_values = []
+        max_ref_dose = np.max(dose_ref_points)
+        dd_abs_threshold = (dose_percent_threshold / 100.0) * max_ref_dose
+        cutoff_value = (threshold / 100.0) * max_ref_dose
 
-        # 6. 전역 정규화 값 설정
-        if global_normalisation:
-            global_norm_value = np.max(dose_ref_sorted)
-        else:
-            global_norm_value = None
+        points_analyzed = 0
+        gamma_map_for_display = np.full_like(mcc_dose_data, np.nan)
 
-        # 7. 감마 분석 수행
-        gamma_values_1d = pymedphys.gamma(
-            axes_reference, dose_ref_sorted,
-            axes_reference, dose_eval_sorted,  # 같은 위치에서 비교
-            dose_percent_threshold,
-            distance_mm_threshold,
-            lower_percent_dose_cutoff=threshold,
-            local_gamma=not global_normalisation,
-            global_normalisation=global_norm_value,
-            max_gamma=max_gamma
-        )
-        
-        # 원래 순서로 복원
-        gamma_values = np.empty_like(gamma_values_1d)
-        gamma_values[sorted_indices] = gamma_values_1d
-        
-        # 8. 감마 통계 계산
-        gamma_stats = {}
-        if len(gamma_values) > 0:
-            # NaN 값 제거
-            valid_gamma = gamma_values[~np.isnan(gamma_values)]
-            if len(valid_gamma) > 0:
-                passed = valid_gamma <= 1
-                gamma_stats['pass_rate'] = 100 * np.sum(passed) / len(valid_gamma)
-                gamma_stats['mean'] = np.mean(valid_gamma)
-                gamma_stats['max'] = np.max(valid_gamma)
-                gamma_stats['min'] = np.min(valid_gamma)
-                gamma_stats['total_points'] = len(valid_gamma)
-            else:
-                gamma_stats['pass_rate'] = 0
-                gamma_stats['mean'] = 0
-                gamma_stats['max'] = 0
-                gamma_stats['min'] = 0
-                gamma_stats['total_points'] = 0
+        for i in range(len(coords_ref_phys_shifted)):
+            coord_ref = coords_ref_phys_shifted[i]
+            dose_ref = dose_ref_points[i]
 
-        # 9. 시각화를 위한 2D 감마 맵 생성
-        gamma_map = np.full_like(mcc_data, np.nan, dtype=float)
-        gamma_map[valid_mcc_mask] = gamma_values
-        
-        phys_extent = reference_handler.get_physical_extent()
-        
-        logger.info(f"감마 분석 완료: {len(dose_reference)}개 측정점에서 통과율 {gamma_stats.get('pass_rate', 0):.1f}%")
+            if dose_ref < cutoff_value:
+                continue
+            points_analyzed += 1
+
+            min_x_search, min_y_search = evaluation_handler.physical_to_pixel_coord(coord_ref[0] - distance_mm_threshold, coord_ref[1] - distance_mm_threshold)
+            max_x_search, max_y_search = evaluation_handler.physical_to_pixel_coord(coord_ref[0] + distance_mm_threshold, coord_ref[1] + distance_mm_threshold)
             
-        return gamma_map, gamma_stats, phys_extent
+            candidate_pixels = []
+            for r in range(min_y_search, max_y_search + 1):
+                for c in range(min_x_search, max_x_search + 1):
+                    try:
+                        phys_coord_cand = evaluation_handler.pixel_to_physical_coord(c, r)
+                        dist_sq = (phys_coord_cand[0] - coord_ref[0])**2 + (phys_coord_cand[1] - coord_ref[1])**2
+                        
+                        if dist_sq <= distance_mm_threshold**2:
+                            dose_cand = dicom_dose_data[r, c]
+                            candidate_pixels.append({'dist_sq': dist_sq, 'dose_diff': abs(dose_cand - dose_ref), 'dist': np.sqrt(dist_sq)})
+                    except IndexError:
+                        continue
+
+            if not candidate_pixels:
+                gamma_val = np.inf
+            else:
+                best_candidate = min(candidate_pixels, key=lambda x: x['dose_diff'])
+                gamma_sq = (best_candidate['dist'] / distance_mm_threshold)**2 + (best_candidate['dose_diff'] / dd_abs_threshold)**2
+                gamma_val = np.sqrt(gamma_sq)
+            
+            # Store gamma value for stats
+            gamma_values.append(gamma_val)
+            # Store gamma value in a 2D map for display
+            gamma_map_for_display[valid_indices[0][i], valid_indices[1][i]] = gamma_val
+
+        # 3. 감마 통계 계산
+        gamma_stats = {}
+        valid_gamma = np.array(gamma_values)
+        valid_gamma = valid_gamma[~np.isinf(valid_gamma)]
+
+        if len(valid_gamma) > 0:
+            passed = valid_gamma <= 1
+            gamma_stats['pass_rate'] = 100 * np.sum(passed) / len(valid_gamma)
+            gamma_stats['mean'] = np.mean(valid_gamma)
+            gamma_stats['max'] = np.max(valid_gamma)
+            gamma_stats['min'] = np.min(valid_gamma)
+            gamma_stats['total_points'] = len(valid_gamma)
+        else:
+            gamma_stats.update({'pass_rate': 0, 'mean': 0, 'max': 0, 'min': 0, 'total_points': 0})
+        
+        logger.info(f"감마 분석 완료: {gamma_stats.get('total_points', 0)}개 지점에서 통과율 {gamma_stats.get('pass_rate', 0):.1f}%")
+            
+        return gamma_map_for_display, gamma_stats, phys_extent
     
     except Exception as e:
         logger.error(f"감마 분석 오류: {str(e)}")

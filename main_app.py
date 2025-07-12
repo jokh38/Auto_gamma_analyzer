@@ -244,30 +244,22 @@ class GammaAnalysisApp(QMainWindow):
             QMessageBox.critical(self, "Error", "Failed to load DICOM file")
             return
         
-        # 픽셀 데이터 및 크롭 경계 가져오기
         self.dicom_image = self.dicom_handler.get_pixel_data()
-        self.dose_bounds = self.dicom_handler.dose_bounds
+        self.dose_bounds = self.dicom_handler.dose_bounds # 크롭 경계 가져오기
         
-        # 원점 정보 가져오기
         self.dicom_origin_x, self.dicom_origin_y = self.dicom_handler.get_origin_coords()
         self.pixel_spacing, _ = self.dicom_handler.get_spacing()
         
-        # 스핀박스 값 업데이트
         self.dicom_x_spin.setValue(self.dicom_origin_x)
         self.dicom_y_spin.setValue(self.dicom_origin_y)
         
-        # DICOM 이미지 그리기
         self.redraw_all_images()
         
-        # 파일 레이블 업데이트
         self.dicom_filename = self.dicom_handler.get_filename()
         self.dicom_label.setText(f"DICOM RT Dose: {self.dicom_filename}")
-        
-        # 원점 정보 표시 업데이트
-        self.origin_label.setText(f"DICOM 원점: ({self.dicom_origin_x}, {self.dicom_origin_y}) 픽셀, 간격: {self.pixel_spacing} mm")
+        self.origin_label.setText(f"DICOM Origin: ({self.dicom_origin_x}, {self.dicom_origin_y}) pixels, Spacing: {self.pixel_spacing:.2f} mm")
 
-        # 두 파일이 모두 로드되었으면 기본 프로파일 생성
-        if self.mcc_handler.get_matrix_data() is not None:
+        if self.mcc_handler.get_pixel_data() is not None:
             self.set_default_profile_and_generate()
 
     def load_mcc_file(self):
@@ -289,21 +281,17 @@ class GammaAnalysisApp(QMainWindow):
             QMessageBox.critical(self, "Error", "Failed to load MCC file")
             return
         
-        # MCC 이미지 그리기
         self.redraw_all_images()
         
-        # 장비 정보 업데이트
         mcc_origin_x, mcc_origin_y = self.mcc_handler.get_origin_coords()
         mcc_spacing_x, mcc_spacing_y = self.mcc_handler.get_spacing()
         
         self.device_label.setText(f"Device Type: {self.mcc_handler.get_device_name()}")
         self.origin_label.setText(f"MCC Origin: ({mcc_origin_x}, {mcc_origin_y}) pixels, Spacing: {mcc_spacing_x}x{mcc_spacing_y} mm")
         
-        # 파일 레이블 업데이트
         mcc_filename = self.mcc_handler.get_filename()
         self.mcc_label.setText(f"MCC File: {mcc_filename}")
 
-        # 두 파일이 모두 로드되었으면 기본 프로파일 생성
         if self.dicom_handler.get_pixel_data() is not None:
             self.set_default_profile_and_generate()
 
@@ -334,7 +322,7 @@ class GammaAnalysisApp(QMainWindow):
             )
 
         # MCC 이미지 그리기 (보간된 데이터 사용)
-        if self.mcc_handler.get_matrix_data() is not None:
+        if self.mcc_handler.get_pixel_data() is not None:
             interpolated_mcc = self.mcc_handler.get_interpolated_matrix_data()
             draw_image(
                 canvas=self.mcc_canvas,
@@ -352,17 +340,17 @@ class GammaAnalysisApp(QMainWindow):
     def update_origin_x(self):
         """DICOM 원점 x좌표 업데이트"""
         if self.dicom_handler.get_pixel_data() is None: return
-        self.dicom_handler.update_origin(self.dicom_x_spin.value(), self.dicom_handler.dicom_origin_y)
-        self.dicom_origin_x = self.dicom_handler.dicom_origin_x
-        self.dose_bounds = self.dicom_handler.dose_bounds
+        self.dicom_handler.dicom_origin_x = self.dicom_x_spin.value()
+        self.dicom_handler.create_physical_coordinates()
+        self.dicom_origin_x, _ = self.dicom_handler.get_origin_coords()
         self.redraw_all_images()
     
     def update_origin_y(self):
         """DICOM 원점 y좌표 업데이트"""
         if self.dicom_handler.get_pixel_data() is None: return
-        self.dicom_handler.update_origin(self.dicom_handler.dicom_origin_x, self.dicom_y_spin.value())
-        self.dicom_origin_y = self.dicom_handler.dicom_origin_y
-        self.dose_bounds = self.dicom_handler.dose_bounds
+        self.dicom_handler.dicom_origin_y = self.dicom_y_spin.value()
+        self.dicom_handler.create_physical_coordinates()
+        _, self.dicom_origin_y = self.dicom_handler.get_origin_coords()
         self.redraw_all_images()
 
     def set_profile_direction(self, direction):
