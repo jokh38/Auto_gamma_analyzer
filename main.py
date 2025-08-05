@@ -12,7 +12,6 @@ def main():
     parser = argparse.ArgumentParser(description="Run gamma analysis on DICOM RT and MCC files.")
     parser.add_argument("--rtplan", type=str, required=True, help="Path to the DICOM RT plan file.")
     parser.add_argument("--measure", type=str, required=True, help="Path to the measurement data file (MCC).")
-    parser.add_argument("--output", type=str, default="report.jpg", help="Path to save the report image.")
     parser.add_argument("--suppression", type=float, default=10.0, help="Dose suppression level in percent.")
     args = parser.parse_args()
 
@@ -72,8 +71,10 @@ def main():
             )
 
             # Generate report
+            _, patient_id, _ = dicom_handler.get_patient_info()
+            output_filename = f"report_{patient_id}.jpg"
             generate_report(
-                args.output,
+                output_filename,
                 dicom_handler,
                 mcc_handler,
                 gamma_map,
@@ -83,7 +84,7 @@ def main():
                 args.suppression,
                 profile_data
             )
-            logger.info(f"Report saved to {args.output}")
+            logger.info(f"Report saved to {output_filename}")
 
         else:
             print("Gamma analysis did not produce valid results.")
