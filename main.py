@@ -12,7 +12,6 @@ def main():
     parser = argparse.ArgumentParser(description="Run gamma analysis on DICOM RT and MCC files.")
     parser.add_argument("--rtplan", type=str, required=True, help="Path to the DICOM RT plan file.")
     parser.add_argument("--measure", type=str, required=True, help="Path to the measurement data file (MCC).")
-    parser.add_argument("--suppression", type=float, default=10.0, help="Dose suppression level in percent.")
     args = parser.parse_args()
 
     logger.info(f"Starting gamma analysis with the following arguments:")
@@ -25,7 +24,8 @@ def main():
             config = json.load(f)
         dta = config.get("dta", 3)
         dd = config.get("dd", 3)
-        logger.info(f"Loaded configuration: dta={dta}, dd={dd}")
+        suppression_level = config.get("suppression_level", 10)
+        logger.info(f"Loaded configuration: dta={dta}, dd={dd}, suppression_level={suppression_level}")
     except FileNotFoundError:
         logger.error("Error: config.json not found. Please create it.")
         sys.exit(1)
@@ -62,9 +62,15 @@ def main():
             print(f"  Min Gamma: {gamma_stats['min']:.3f}")
             print(f"  Total Points: {gamma_stats['total_points']}")
 
-            # Generate profile data for the report (e.g., a central vertical profile)
-            profile_data = extract_profile_data(
+            # Generate profile data for the report
+            ver_profile_data = extract_profile_data(
                 direction="vertical",
+                fixed_position=0,
+                dicom_handler=dicom_handler,
+                mcc_handler=mcc_handler
+            )
+            hor_profile_data = extract_profile_data(
+                direction="horizontal",
                 fixed_position=0,
                 dicom_handler=dicom_handler,
                 mcc_handler=mcc_handler
@@ -81,8 +87,9 @@ def main():
                 gamma_stats,
                 dta,
                 dd,
-                args.suppression,
-                profile_data
+                suppression_level,
+                ver_profile_data,
+                hor_profile_data
             )
             logger.info(f"Report saved to {output_filename}")
 

@@ -10,14 +10,15 @@ def generate_report(
     dta,
     dd,
     suppression_level,
-    profile_data
+    ver_profile_data,
+    hor_profile_data
 ):
     """Generates a report with all the analysis information."""
     fig = plt.figure(figsize=(16, 12))
-    gs = fig.add_gridspec(3, 3)
+    gs = fig.add_gridspec(4, 2)
 
     # Header
-    ax_header = fig.add_subplot(gs[0, :])
+    ax_header = fig.add_subplot(gs[0, 0])
     ax_header.axis('off')
     institution, patient_id, patient_name = dicom_handler.get_patient_info()
     header_text = (
@@ -28,7 +29,7 @@ def generate_report(
     ax_header.text(0.01, 0.5, header_text, transform=ax_header.transAxes, fontsize=12, verticalalignment='center')
 
     # Parameters
-    ax_params = fig.add_subplot(gs[0, 2])
+    ax_params = fig.add_subplot(gs[0, 1])
     ax_params.axis('off')
     params_text = (
         f"DTA: {dta} mm\n"
@@ -50,22 +51,34 @@ def generate_report(
     ax_mcc.set_title('MCC Dose')
 
     # Gamma Map
-    ax_gamma = fig.add_subplot(gs[1, 2])
+    ax_gamma = fig.add_subplot(gs[2, 0])
     im_gamma = ax_gamma.imshow(gamma_map, cmap='coolwarm', extent=mcc_handler.get_physical_extent(), vmin=0, vmax=2)
     fig.colorbar(im_gamma, ax=ax_gamma, label='Gamma Index')
     ax_gamma.set_title(f'Gamma Analysis (Pass: {gamma_stats.get("pass_rate", 0):.1f}%)')
 
-    # Profile
-    ax_profile = fig.add_subplot(gs[2, :])
-    if profile_data:
-        ax_profile.plot(profile_data['phys_coords'], profile_data['dicom_values'], 'b-', label='RT dose')
-        if 'mcc_interp' in profile_data:
-            ax_profile.plot(profile_data['phys_coords'], profile_data['mcc_interp'], 'r-', label='Measurement (interpolated)')
-        ax_profile.set_xlabel('Position (mm)')
-        ax_profile.set_ylabel('Dose (Gy)')
-        ax_profile.set_title('Dose Profile')
-        ax_profile.legend()
-        ax_profile.grid(True)
+    # Vertical Profile
+    ax_ver_profile = fig.add_subplot(gs[3, 0])
+    if ver_profile_data:
+        ax_ver_profile.plot(ver_profile_data['phys_coords'], ver_profile_data['dicom_values'], 'b-', label='RT dose')
+        if 'mcc_interp' in ver_profile_data:
+            ax_ver_profile.plot(ver_profile_data['phys_coords'], ver_profile_data['mcc_interp'], 'r-', label='Measurement (interpolated)')
+        ax_ver_profile.set_xlabel('Position (mm)')
+        ax_ver_profile.set_ylabel('Dose (Gy)')
+        ax_ver_profile.set_title('In-Out Profile (Vertical)')
+        ax_ver_profile.legend()
+        ax_ver_profile.grid(True)
+
+    # Horizontal Profile
+    ax_hor_profile = fig.add_subplot(gs[3, 1])
+    if hor_profile_data:
+        ax_hor_profile.plot(hor_profile_data['phys_coords'], hor_profile_data['dicom_values'], 'b-', label='RT dose')
+        if 'mcc_interp' in hor_profile_data:
+            ax_hor_profile.plot(hor_profile_data['phys_coords'], hor_profile_data['mcc_interp'], 'r-', label='Measurement (interpolated)')
+        ax_hor_profile.set_xlabel('Position (mm)')
+        ax_hor_profile.set_ylabel('Dose (Gy)')
+        ax_hor_profile.set_title('Left-Right Profile (Horizontal)')
+        ax_hor_profile.legend()
+        ax_hor_profile.grid(True)
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.savefig(output_path, format='jpeg')
