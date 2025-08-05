@@ -3,7 +3,8 @@ import json
 import sys
 
 from file_handlers import DicomFileHandler, MCCFileHandler
-from analysis import perform_gamma_analysis
+from analysis import perform_gamma_analysis, extract_profile_data
+from reporting import generate_report
 from utils import logger
 
 def main():
@@ -11,6 +12,8 @@ def main():
     parser = argparse.ArgumentParser(description="Run gamma analysis on DICOM RT and MCC files.")
     parser.add_argument("--rtplan", type=str, required=True, help="Path to the DICOM RT plan file.")
     parser.add_argument("--measure", type=str, required=True, help="Path to the measurement data file (MCC).")
+    parser.add_argument("--output", type=str, default="report.jpg", help="Path to save the report image.")
+    parser.add_argument("--suppression", type=float, default=10.0, help="Dose suppression level in percent.")
     args = parser.parse_args()
 
     logger.info(f"Starting gamma analysis with the following arguments:")
@@ -59,6 +62,29 @@ def main():
             print(f"  Max Gamma: {gamma_stats['max']:.3f}")
             print(f"  Min Gamma: {gamma_stats['min']:.3f}")
             print(f"  Total Points: {gamma_stats['total_points']}")
+
+            # Generate profile data for the report (e.g., a central vertical profile)
+            profile_data = extract_profile_data(
+                direction="vertical",
+                fixed_position=0,
+                dicom_handler=dicom_handler,
+                mcc_handler=mcc_handler
+            )
+
+            # Generate report
+            generate_report(
+                args.output,
+                dicom_handler,
+                mcc_handler,
+                gamma_map,
+                gamma_stats,
+                dta,
+                dd,
+                args.suppression,
+                profile_data
+            )
+            logger.info(f"Report saved to {args.output}")
+
         else:
             print("Gamma analysis did not produce valid results.")
 

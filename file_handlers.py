@@ -175,6 +175,17 @@ class DicomFileHandler(BaseFileHandler):
     def get_spacing(self):
         return self.pixel_spacing, self.pixel_spacing
 
+    def get_patient_info(self):
+        """환자 정보(기관명, ID, 이름) 반환"""
+        if self.dicom_data is None:
+            return None, None, None
+
+        institution = self.dicom_data.get("InstitutionName", "N/A")
+        patient_id = self.dicom_data.get("PatientID", "N/A")
+        patient_name = self.dicom_data.get("PatientName", "N/A")
+
+        return institution, patient_id, patient_name
+
 class MCCFileHandler(BaseFileHandler):
     """MCC 파일을 처리하는 클래스"""
     def __init__(self):
