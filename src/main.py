@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+import os
 
 from file_handlers import DicomFileHandler, MCCFileHandler
 from analysis import perform_gamma_analysis, extract_profile_data
@@ -77,8 +78,10 @@ def main():
             )
 
             # Generate report
+            reports_dir = "reports"
+            os.makedirs(reports_dir, exist_ok=True)
             _, patient_id, _ = dicom_handler.get_patient_info()
-            output_filename = f"report_{patient_id}.jpg"
+            output_filename = os.path.join(reports_dir, f"report_{patient_id}.jpg")
             generate_report(
                 output_filename,
                 dicom_handler,
