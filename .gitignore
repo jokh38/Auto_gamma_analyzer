@@ -13,3 +13,6 @@ logs/
 
 # Backup
 bk/
+
+# Reports
+reports/
