@@ -1,248 +1,295 @@
 
+"""
+This module provides functions for analyzing and comparing DICOM and MCC data,
+including profile extraction and gamma analysis.
+"""
 import numpy as np
-from scipy.interpolate import interpn
-from utils import logger, find_nearest_index
+from scipy.interpolate import griddata
+from utils import logger, find_nearest_index, save_map_to_csv
+import os
 
 def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=None):
     """
-    프로파일 데이터 추출 함수
-    
+    Extracts profile data from DICOM and MCC datasets.
+
     Args:
-        direction: "vertical" 또는 "horizontal"
-        fixed_position: 고정된 위치(mm)
-        dicom_handler: DICOM 영상 및 좌표 정보가 포함된 핸들러 객체
-        mcc_handler: MCC 영상 및 좌표 정보가 포함된 핸들러 객체(선택 사항)
-    
+        direction (str): "vertical" or "horizontal".
+        fixed_position (float): The fixed position in mm.
+        dicom_handler: Handler object containing DICOM image and coordinate information.
+        mcc_handler: Handler object containing MCC image and coordinate information (optional).
+
     Returns:
-        프로파일 데이터 포함 딕셔너리
+        dict: A dictionary containing the profile data.
     """
-    # 프로파일 데이터 저장용 딕셔너리 초기화
     profile_data = {'type': direction, 'fixed_pos': fixed_position}
     
-    # DICOM 이미지 데이터 추출
     dicom_image = dicom_handler.get_pixel_data()
-    dicom_phys_x_mesh = dicom_handler.phys_x_mesh
-    dicom_phys_y_mesh = dicom_handler.phys_y_mesh
+    if dicom_image is None:
+        logger.warning("DICOM pixel data not available for profile extraction.")
+        return profile_data
     
     try:
-        # 프로파일 방향에 따라 다르게 처리
+        # Define axis-dependent variables based on direction
         if direction == "vertical":
-            # 수직 프로파일: x 좌표 고정, y 변화
-            phys_x = fixed_position  # 고정된 물리적 x 좌표(mm)
+            # Vertical profile: x is fixed, y is the profile axis
+            fixed_axis_coords_dicom = dicom_handler.phys_x_mesh[0, :]
+            profile_axis_mesh_dicom = dicom_handler.phys_y_mesh
+            slicer_dicom = lambda idx: (slice(None), idx)
+            if mcc_handler:
+                mcc_fixed_axis_coords = mcc_handler.phys_x_mesh[0, :]
+                mcc_profile_axis_mesh = mcc_handler.phys_y_mesh
+                slicer_mcc = lambda idx: (slice(None), idx)
+                sort_required = True  # MCC y-axis is inverted and needs sorting for interpolation
+        else:  # "horizontal"
+            # Horizontal profile: y is fixed, x is the profile axis
+            fixed_axis_coords_dicom = dicom_handler.phys_y_mesh[:, 0]
+            profile_axis_mesh_dicom = dicom_handler.phys_x_mesh
+            slicer_dicom = lambda idx: (idx, slice(None))
+            if mcc_handler:
+                mcc_fixed_axis_coords = mcc_handler.phys_y_mesh[:, 0]
+                mcc_profile_axis_mesh = mcc_handler.phys_x_mesh
+                slicer_mcc = lambda idx: (idx, slice(None))
+                sort_required = False # MCC x-axis is already sorted
+
+        # --- Common Logic for both directions ---
+
+        # 1. Extract DICOM profile
+        closest_idx_dicom = find_nearest_index(fixed_axis_coords_dicom, fixed_position)
+        profile_coords_dicom = profile_axis_mesh_dicom[slicer_dicom(closest_idx_dicom)]
+        dicom_values = dicom_image[slicer_dicom(closest_idx_dicom)]
+
+        # For vertical profiles, the physical y-coordinate is descending.
+        # To ensure consistency for interpolation and plotting, we make it ascending.
+        if sort_required:
+            # Reverse both arrays to sort them in ascending order of coordinates.
+            profile_coords_dicom = profile_coords_dicom[::-1]
+            dicom_values = dicom_values[::-1]
+
+        profile_data['phys_coords'] = profile_coords_dicom
+        profile_data['dicom_values'] = dicom_values
+
+        # 2. Process MCC data if available
+        if mcc_handler and mcc_handler.get_matrix_data() is not None:
+            mcc_image = mcc_handler.get_matrix_data()
             
-            # 물리적 좌표에서 가장 가까운 x 인덱스 찾기
-            phys_x_coords = dicom_phys_x_mesh[0, :]
-            closest_x_idx = find_nearest_index(phys_x_coords, phys_x)
+            closest_idx_mcc = find_nearest_index(mcc_fixed_axis_coords, fixed_position)
+            mcc_line_values = mcc_image[slicer_mcc(closest_idx_mcc)]
             
-            # 해당 열의 물리적 y 좌표 가져오기
-            phys_y_coords = dicom_phys_y_mesh[:, closest_x_idx]
+            valid_indices = np.where(mcc_line_values >= 0)[0]
             
-            # DICOM 값 추출
-            dicom_values = dicom_image[:, closest_x_idx]
-            
-            # 데이터 저장
-            profile_data['phys_coords'] = phys_y_coords  # 물리적 y 좌표(mm)
-            profile_data['dicom_values'] = dicom_values
-            
-            # MCC 데이터가 있는 경우 처리
-            if mcc_handler is not None:
-                mcc_image = mcc_handler.get_matrix_data()
-                mcc_phys_x_mesh = mcc_handler.phys_x_mesh
-                mcc_phys_y_mesh = mcc_handler.phys_y_mesh
+            if len(valid_indices) > 0:
+                # Get physical coordinates and dose values for valid MCC points
+                if direction == "vertical":
+                    mcc_phys_coords = mcc_profile_axis_mesh[valid_indices, closest_idx_mcc]
+                else: # horizontal
+                    mcc_phys_coords = mcc_profile_axis_mesh[closest_idx_mcc, valid_indices]
                 
-                # 물리적 좌표에서 가장 가까운 x 인덱스 찾기
-                mcc_phys_x_array = mcc_phys_x_mesh[0, :]
-                mcc_closest_x_idx = find_nearest_index(mcc_phys_x_array, phys_x)
+                mcc_values = mcc_line_values[valid_indices]
+
+                # For vertical profiles, the physical y-coordinate is descending.
+                # We sort it here to ensure all subsequent operations use ascending coordinates.
+                if sort_required:
+                    mcc_phys_coords = mcc_phys_coords[::-1]
+                    mcc_values = mcc_values[::-1]
                 
-                # 유효한 MCC 값만 추출(-1 이상인 값)
-                valid_indices = np.where(mcc_image[:, mcc_closest_x_idx] >= 0)[0]
+                # Find corresponding DICOM values at MCC measurement points
+                dicom_at_mcc_positions = np.array([
+                    dicom_values[find_nearest_index(profile_coords_dicom, pos)] for pos in mcc_phys_coords
+                ])
                 
-                if len(valid_indices) > 0:
-                    # 유효한 해상도에서 실제 MCC 데이터 포인트 가져오기
-                    mcc_phys_y_coords = mcc_phys_y_mesh[valid_indices, mcc_closest_x_idx]
-                    mcc_values = mcc_image[valid_indices, mcc_closest_x_idx]
-                    
-                    # MCC 위치에서의 DICOM 값을 위한 배열 생성
-                    dicom_at_mcc_positions = np.full_like(mcc_values, np.nan)
-                    
-                    # 각 MCC 포인트에 대해 가장 가까운 DICOM 값 찾기
-                    for i, mcc_y in enumerate(mcc_phys_y_coords):
-                        closest_y_idx = find_nearest_index(phys_y_coords, mcc_y)
-                        dicom_at_mcc_positions[i] = dicom_values[closest_y_idx]
-                    
-                    # 전체 프로파일 시각화를 위한 보간 생성
-                    if len(mcc_values) > 1:
-                        mcc_interp = np.interp(
-                            phys_y_coords,
-                            mcc_phys_y_coords,
-                            mcc_values,
-                            left=np.nan, right=np.nan
-                        )
-                        
-                        profile_data['mcc_phys_coords'] = mcc_phys_y_coords
-                        profile_data['mcc_values'] = mcc_values
-                        profile_data['mcc_interp'] = mcc_interp
-                        
-                        # 테이블용 MCC 위치에서의 DICOM 값 저장
-                        profile_data['dicom_at_mcc'] = dicom_at_mcc_positions
-                        
-        else:
-            # 수평 프로파일: y 좌표 고정, x 변화
-            phys_y = fixed_position  # 고정된 물리적 y 좌표(mm)
-            
-            # 물리적 좌표에서 가장 가까운 y 인덱스 찾기
-            phys_y_coords = dicom_phys_y_mesh[:, 0]
-            closest_y_idx = find_nearest_index(phys_y_coords, phys_y)
-            
-            # 해당 행의 물리적 x 좌표 가져오기
-            phys_x_coords = dicom_phys_x_mesh[closest_y_idx, :]
-            
-            # DICOM 값 추출
-            dicom_values = dicom_image[closest_y_idx, :]
-            
-            # 데이터 저장
-            profile_data['phys_coords'] = phys_x_coords  # 물리적 x 좌표(mm)
-            profile_data['dicom_values'] = dicom_values
-            
-            # MCC 데이터가 있는 경우 처리
-            if mcc_handler is not None:
-                mcc_image = mcc_handler.get_matrix_data()
-                mcc_phys_x_mesh = mcc_handler.phys_x_mesh
-                mcc_phys_y_mesh = mcc_handler.phys_y_mesh
-                
-                # 물리적 좌표에서 가장 가까운 y 인덱스 찾기
-                mcc_phys_y_array = mcc_phys_y_mesh[:, 0]
-                mcc_closest_y_idx = find_nearest_index(mcc_phys_y_array, phys_y)
-                
-                # 유효한 MCC 값만 추출(-1 이상인 값)
-                valid_indices = np.where(mcc_image[mcc_closest_y_idx, :] >= 0)[0]
-                
-                if len(valid_indices) > 0:
-                    # 유효한 해상도에서 실제 MCC 데이터 포인트 가져오기
-                    mcc_phys_x_coords = mcc_phys_x_mesh[mcc_closest_y_idx, valid_indices]
-                    mcc_values = mcc_image[mcc_closest_y_idx, valid_indices]
-                    
-                    # MCC 위치에서의 DICOM 값을 위한 배열 생성
-                    dicom_at_mcc_positions = np.full_like(mcc_values, np.nan)
-                    
-                    # 각 MCC 포인트에 대해 가장 가까운 DICOM 값 찾기
-                    for i, mcc_x in enumerate(mcc_phys_x_coords):
-                        closest_x_idx = find_nearest_index(phys_x_coords, mcc_x)
-                        dicom_at_mcc_positions[i] = dicom_values[closest_x_idx]
-                    
-                    # 전체 프로파일 시각화를 위한 보간 생성
-                    if len(mcc_values) > 1:
-                        mcc_interp = np.interp(
-                            phys_x_coords,
-                            mcc_phys_x_coords,
-                            mcc_values,
-                            left=np.nan, right=np.nan
-                        )
-                        
-                        profile_data['mcc_phys_coords'] = mcc_phys_x_coords
-                        profile_data['mcc_values'] = mcc_values
-                        profile_data['mcc_interp'] = mcc_interp
-                        
-                        # 테이블용 MCC 위치에서의 DICOM 값 저장
-                        profile_data['dicom_at_mcc'] = dicom_at_mcc_positions
-    
+                # Interpolate MCC data for smooth plotting
+                if len(mcc_values) > 1:
+                    # The coordinate arrays are now guaranteed to be ascending,
+                    # so we can interpolate directly.
+                    mcc_interp = np.interp(
+                        profile_coords_dicom,
+                        mcc_phys_coords,
+                        mcc_values,
+                        left=np.nan, right=np.nan
+                    )
+                    profile_data['mcc_interp'] = mcc_interp
+
+                profile_data['mcc_phys_coords'] = mcc_phys_coords
+                profile_data['mcc_values'] = mcc_values
+                profile_data['dicom_at_mcc'] = dicom_at_mcc_positions
+
         return profile_data
         
     except Exception as e:
-        logger.error(f"프로파일 데이터 추출 오류: {str(e)}")
-        # 오류 발생 시 기본 데이터만 반환
+        logger.error(f"프로파일 데이터 추출 오류: {str(e)}", exc_info=True)
         return profile_data
 
-def perform_gamma_analysis(reference_handler, evaluation_handler, 
-                          dose_percent_threshold, distance_mm_threshold, 
-                          global_normalisation=True, threshold=10, max_gamma=None):
+def perform_gamma_analysis(reference_handler, evaluation_handler,
+                           dose_percent_threshold, distance_mm_threshold,
+                           global_normalisation=True, threshold=10, max_gamma=None,
+                           save_csv=False, csv_dir=None):
     """
-    수동 DTA 검색 방식을 사용하여 감마 분석을 수행합니다.
-    - 기준: MCC의 각 유효 측정점
-    - 대상: DICOM의 조밀한 그리드
-    - 방식: 각 MCC 점을 기준으로 DTA 반경 내 모든 DICOM 점을 검색하여
-            선량 차이가 최소인 점을 찾아 감마를 계산합니다.
+    Performs gamma index analysis directly between sparse reference points (MCC)
+    and a dense evaluation grid (DICOM) without interpolation.
+
+    Args:
+        reference_handler: Handler for the reference data (MCC).
+        evaluation_handler: Handler for the evaluation data (DICOM).
+        dose_percent_threshold (float): Dose difference criterion (%).
+        distance_mm_threshold (float): Distance-to-agreement criterion (mm).
+        global_normalisation (bool): Whether to use global normalization.
+        threshold (int): The lower dose threshold for including points in the analysis (%).
+        save_csv (bool): Whether to save the analysis maps to CSV files.
+        csv_dir (str): The directory to save the CSV files in.
+
+    Returns:
+        tuple: A tuple containing:
+            - gamma_map (np.ndarray): The gamma map.
+            - gamma_stats (dict): Statistics of the gamma analysis.
+            - phys_extent (list): The physical extent of the analysis.
+            - mcc_interp_data (np.ndarray): Interpolated MCC data for visualization.
+            - dd_map (np.ndarray): The dose difference map.
+            - dta_map (np.ndarray): The distance-to-agreement map.
+            - dd_stats (dict): Statistics of the dose difference analysis.
+            - dta_stats (dict): Statistics of the distance-to-agreement analysis.
     """
     try:
-        # 1. 데이터 준비 및 좌표 정렬
-        # 1-1. MCC 유효 측정점 추출
+        # --- Step 1: Extract and filter reference data (MCC) ---
         mcc_dose_data = reference_handler.get_matrix_data()
         if mcc_dose_data is None:
-            raise ValueError("MCC 데이터를 찾을 수 없습니다.")
-            
-        valid_indices = np.where(mcc_dose_data >= 0)
-        coords_ref_phys = np.array([reference_handler.pixel_to_physical_coord(px, py) for py, px in np.vstack(valid_indices).T])
-        dose_ref_points = mcc_dose_data[valid_indices]
+            raise ValueError("MCC data not found in reference_handler.")
+
+        # Get all valid (>=0) measurement points and their coordinates
+        all_valid_indices = np.where(mcc_dose_data >= 0)
+        if all_valid_indices[0].size == 0:
+            raise ValueError("No valid measurement data (>= 0) in MCC file.")
+
+        # Vectorized calculation of physical coordinates from pixel coordinates
+        y_pix, x_pix = all_valid_indices
+        handler = reference_handler
+        full_grid_px = x_pix + handler.crop_pixel_offset[0]
+        full_grid_py = y_pix + handler.crop_pixel_offset[1]
+        phys_x_all = (full_grid_px - handler.mcc_origin_x) * handler.mcc_spacing_x
+        phys_y_all = (full_grid_py - handler.mcc_origin_y) * handler.mcc_spacing_y
+        all_mcc_coords_phys = np.vstack((phys_x_all, phys_y_all)).T
+
+        all_mcc_dose_values = mcc_dose_data[all_valid_indices]
+
+        # Determine normalization dose for thresholding
+        if global_normalisation:
+            norm_dose = np.max(all_mcc_dose_values)
+        else:
+            norm_dose = 1.0  # Local normalization handled per point
+        
+        if norm_dose == 0:
+            raise ValueError("Cannot determine normalization dose (max reference dose is zero).")
+
+        # Filter points based on the lower dose cutoff threshold
+        threshold_dose = (threshold / 100.0) * norm_dose
+        analysis_mask = all_mcc_dose_values >= threshold_dose
+
+        # --- Step 2: Extract evaluation data (DICOM) ---
+        dicom_dose_grid = evaluation_handler.get_pixel_data()
+        if dicom_dose_grid is None:
+            raise ValueError("DICOM data not found in evaluation_handler.")
+
+        dicom_phys_x_mesh, dicom_phys_y_mesh = evaluation_handler.phys_x_mesh, evaluation_handler.phys_y_mesh
+        phys_x_dicom = dicom_phys_x_mesh[0, :]  # x coordinates
+        phys_y_dicom = dicom_phys_y_mesh[:, 0]  # y coordinates
         phys_extent = reference_handler.get_physical_extent()
 
-        if dose_ref_points.size == 0:
-            raise ValueError("MCC 파일에 유효한 측정 데이터가 없습니다.")
+        # If no points are left after filtering, return early.
+        if not np.any(analysis_mask):
+            logger.warning(f"No MCC data points above the {threshold}% dose threshold ({threshold_dose:.2f} Gy). Gamma analysis will be skipped.")
+            gamma_stats = {'pass_rate': 100, 'mean': 0, 'max': 0, 'min': 0, 'total_points': 0}
+            gamma_map_for_display = np.full_like(mcc_dose_data, np.nan)
+            # Still create interpolated data for the report
+            mcc_interp_data = griddata(
+                all_mcc_coords_phys, all_mcc_dose_values,
+                (dicom_phys_x_mesh, dicom_phys_y_mesh),
+                method='linear', fill_value=0
+            )
+            # Return empty dd and dta maps when no analysis is performed
+            dd_map_empty = np.full_like(mcc_dose_data, np.nan)
+            dta_map_empty = np.full_like(mcc_dose_data, np.nan)
+            dd_stats_empty = {'mean': 0, 'max': 0, 'min': 0, 'std': 0, 'total_points': 0}
+            dta_stats_empty = {'mean': 0, 'max': 0, 'min': 0, 'std': 0, 'total_points': 0}
+            return gamma_map_for_display, gamma_stats, phys_extent, mcc_interp_data, dd_map_empty, dta_map_empty, dd_stats_empty, dta_stats_empty
 
-        # 1-2. DICOM 데이터 준비
-        dicom_dose_data = evaluation_handler.get_pixel_data()
-        if dicom_dose_data is None:
-            raise ValueError("DICOM 데이터를 찾을 수 없습니다.")
+        # These are the points that will be used in the gamma calculation
+        mcc_dose_for_gamma = all_mcc_dose_values[analysis_mask]
+        points_ref = all_mcc_coords_phys[analysis_mask]
+        doses_ref = mcc_dose_for_gamma
 
-        # 1-3. 최대 선량점 기준 좌표 정렬
-        max_dose_idx_mcc = np.argmax(dose_ref_points)
-        max_dose_phys_coord_mcc = coords_ref_phys[max_dose_idx_mcc]
-        
-        max_dose_pixel_idx_dicom = np.unravel_index(np.argmax(dicom_dose_data), dicom_dose_data.shape)
-        max_dose_phys_coord_dicom = evaluation_handler.pixel_to_physical_coord(max_dose_pixel_idx_dicom[1], max_dose_pixel_idx_dicom[0])
+        # Get the original pixel indices of the analyzed points to place results back into the map
+        original_indices_for_gamma = (all_valid_indices[0][analysis_mask], all_valid_indices[1][analysis_mask])
 
-        shift = np.array(max_dose_phys_coord_dicom) - np.array(max_dose_phys_coord_mcc)
-        coords_ref_phys_shifted = coords_ref_phys + shift
-        logger.info(f"좌표 정렬 완료 (이동량: dx={shift[0]:.2f}, dy={shift[1]:.2f} mm)")
+        # --- Step 3: Perform manual gamma calculation ---
+        # Setup criteria
+        dta_criteria_sq = distance_mm_threshold ** 2
 
-        # 2. 감마 계산
-        gamma_values = []
-        max_ref_dose = np.max(dose_ref_points)
-        dd_abs_threshold = (dose_percent_threshold / 100.0) * max_ref_dose
-        cutoff_value = (threshold / 100.0) * max_ref_dose
+        # Initialize gamma, dd, and dta values arrays
+        gamma_values = np.full(len(points_ref), np.inf)
+        dd_values = np.full(len(points_ref), np.inf)
+        dta_values = np.full(len(points_ref), np.inf)
 
-        points_analyzed = 0
-        gamma_map_for_display = np.full_like(mcc_dose_data, np.nan)
+        logger.info(f"Starting manual gamma calculation for {len(points_ref)} reference points...")
 
-        for i in range(len(coords_ref_phys_shifted)):
-            coord_ref = coords_ref_phys_shifted[i]
-            dose_ref = dose_ref_points[i]
-
-            if dose_ref < cutoff_value:
-                continue
-            points_analyzed += 1
-
-            min_x_search, min_y_search = evaluation_handler.physical_to_pixel_coord(coord_ref[0] - distance_mm_threshold, coord_ref[1] - distance_mm_threshold)
-            max_x_search, max_y_search = evaluation_handler.physical_to_pixel_coord(coord_ref[0] + distance_mm_threshold, coord_ref[1] + distance_mm_threshold)
-            
-            candidate_pixels = []
-            for r in range(min_y_search, max_y_search + 1):
-                for c in range(min_x_search, max_x_search + 1):
-                    try:
-                        phys_coord_cand = evaluation_handler.pixel_to_physical_coord(c, r)
-                        dist_sq = (phys_coord_cand[0] - coord_ref[0])**2 + (phys_coord_cand[1] - coord_ref[1])**2
-                        
-                        if dist_sq <= distance_mm_threshold**2:
-                            dose_cand = dicom_dose_data[r, c]
-                            candidate_pixels.append({'dist_sq': dist_sq, 'dose_diff': abs(dose_cand - dose_ref), 'dist': np.sqrt(dist_sq)})
-                    except IndexError:
-                        continue
-
-            if not candidate_pixels:
-                gamma_val = np.inf
+        # 각 기준(MCC) 포인트에 대해 감마 계산
+        for i, (point_ref, dose_ref) in enumerate(zip(points_ref, doses_ref)):
+            # Dose difference criteria (global or local normalization)
+            if global_normalisation:
+                dd_criteria_sq = (dose_percent_threshold / 100.0 * norm_dose) ** 2
             else:
-                best_candidate = min(candidate_pixels, key=lambda x: x['dose_diff'])
-                gamma_sq = (best_candidate['dist'] / distance_mm_threshold)**2 + (best_candidate['dose_diff'] / dd_abs_threshold)**2
-                gamma_val = np.sqrt(gamma_sq)
-            
-            # Store gamma value for stats
-            gamma_values.append(gamma_val)
-            # Store gamma value in a 2D map for display
-            gamma_map_for_display[valid_indices[0][i], valid_indices[1][i]] = gamma_val
+                dd_criteria_sq = (dose_percent_threshold / 100.0 * dose_ref) ** 2
 
-        # 3. 감마 통계 계산
+            # 1. 거리 계산: 현재 기준점과 모든 DICOM 픽셀 간의 거리
+            # 최적화: DTA 내의 점들만 고려
+            search_radius = distance_mm_threshold * 2  # 탐색 반경 (DTA의 2배 정도)
+
+            # DICOM 좌표에서 탐색 영역 필터링
+            min_x, max_x = point_ref[0] - search_radius, point_ref[0] + search_radius
+            min_y, max_y = point_ref[1] - search_radius, point_ref[1] + search_radius
+
+            x_indices = np.where((phys_x_dicom >= min_x) & (phys_x_dicom <= max_x))[0]
+            y_indices = np.where((phys_y_dicom >= min_y) & (phys_y_dicom <= max_y))[0]
+
+            if x_indices.size == 0 or y_indices.size == 0:
+                continue
+
+            # 탐색 영역 내의 DICOM 좌표와 선량 값
+            eval_coords_y, eval_coords_x = np.meshgrid(phys_y_dicom[y_indices], phys_x_dicom[x_indices], indexing='ij')
+            points_eval = np.vstack((eval_coords_x.ravel(), eval_coords_y.ravel())).T
+            doses_eval = dicom_dose_grid[np.ix_(y_indices, x_indices)].ravel()
+
+            # 2. 선량 차이 계산
+            dose_diff_sq = (doses_eval - dose_ref) ** 2
+            
+            # 3. 거리 차이 계산
+            dist_sq = np.sum((points_eval - point_ref)**2, axis=1)
+
+            # 4. 감마 계산
+            gamma_sq = (dist_sq / dta_criteria_sq) + (dose_diff_sq / dd_criteria_sq)
+
+            # 5. 최소 감마 값 및 해당 지점의 dd, dta 저장
+            min_idx = np.argmin(gamma_sq)
+            min_gamma = np.sqrt(gamma_sq[min_idx])
+            gamma_values[i] = min_gamma
+            
+            # Store dd and dta values at the minimum gamma point
+            dd_values[i] = np.sqrt(dose_diff_sq[min_idx]) / (dose_percent_threshold / 100.0 * (norm_dose if global_normalisation else dose_ref))
+            dta_values[i] = np.sqrt(dist_sq[min_idx]) / distance_mm_threshold
+
+            # Progress logging for large datasets
+            if (i + 1) % 100 == 0:
+                logger.info(f"Processed {i + 1}/{len(points_ref)} reference points...")
+
+        # --- Step 4: Create gamma, dd, and dta maps and calculate statistics ---
+        gamma_map_for_display = np.full_like(mcc_dose_data, np.nan)
+        dd_map_for_display = np.full_like(mcc_dose_data, np.nan)
+        dta_map_for_display = np.full_like(mcc_dose_data, np.nan)
+
+        gamma_map_for_display[original_indices_for_gamma] = gamma_values
+        dd_map_for_display[original_indices_for_gamma] = dd_values
+        dta_map_for_display[original_indices_for_gamma] = dta_values
+
         gamma_stats = {}
-        valid_gamma = np.array(gamma_values)
-        valid_gamma = valid_gamma[~np.isinf(valid_gamma)]
+        valid_gamma = gamma_values[~np.isinf(gamma_values) & ~np.isnan(gamma_values)]
 
         if len(valid_gamma) > 0:
             passed = valid_gamma <= 1
@@ -253,11 +300,62 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
             gamma_stats['total_points'] = len(valid_gamma)
         else:
             gamma_stats.update({'pass_rate': 0, 'mean': 0, 'max': 0, 'min': 0, 'total_points': 0})
+
+        # Calculate DD and DTA statistics
+        dd_stats = {}
+        dta_stats = {}
+
+        valid_dd = dd_values[~np.isinf(dd_values) & ~np.isnan(dd_values)]
+        valid_dta = dta_values[~np.isinf(dta_values) & ~np.isnan(dta_values)]
         
-        logger.info(f"감마 분석 완료: {gamma_stats.get('total_points', 0)}개 지점에서 통과율 {gamma_stats.get('pass_rate', 0):.1f}%")
+        if len(valid_dd) > 0:
+            dd_stats['mean'] = np.mean(valid_dd)
+            dd_stats['max'] = np.max(valid_dd)
+            dd_stats['min'] = np.min(valid_dd)
+            dd_stats['std'] = np.std(valid_dd)
+            dd_stats['total_points'] = len(valid_dd)
+        else:
+            dd_stats.update({'mean': 0, 'max': 0, 'min': 0, 'std': 0, 'total_points': 0})
             
-        return gamma_map_for_display, gamma_stats, phys_extent
-    
+        if len(valid_dta) > 0:
+            dta_stats['mean'] = np.mean(valid_dta)
+            dta_stats['max'] = np.max(valid_dta)
+            dta_stats['min'] = np.min(valid_dta)
+            dta_stats['std'] = np.std(valid_dta)
+            dta_stats['total_points'] = len(valid_dta)
+        else:
+            dta_stats.update({'mean': 0, 'max': 0, 'min': 0, 'std': 0, 'total_points': 0})
+
+        logger.info(f"Manual gamma analysis complete: {gamma_stats.get('total_points', 0)} points analyzed, pass rate {gamma_stats.get('pass_rate', 0):.1f}%")
+
+        # --- Step 5: Create interpolated MCC data for visualization purposes only ---
+        mcc_interp_data = griddata(
+            all_mcc_coords_phys,
+            all_mcc_dose_values,
+            (dicom_phys_x_mesh, dicom_phys_y_mesh),
+            method='linear',
+            fill_value=0
+        )
+
+        # --- Step 6: Save maps to CSV ---
+        if save_csv and csv_dir:
+            try:
+                base_filename = os.path.splitext(os.path.basename(reference_handler.filename))[0]
+                mcc_phys_x_mesh = reference_handler.phys_x_mesh
+                mcc_phys_y_mesh = reference_handler.phys_y_mesh
+
+                if gamma_stats.get('total_points', 0) > 0:
+                    gamma_path = os.path.join(csv_dir, f"{base_filename}_gamma.csv")
+                    dd_path = os.path.join(csv_dir, f"{base_filename}_dd.csv")
+                    dta_path = os.path.join(csv_dir, f"{base_filename}_dta.csv")
+                    save_map_to_csv(gamma_map_for_display, mcc_phys_x_mesh, mcc_phys_y_mesh, gamma_path)
+                    save_map_to_csv(dd_map_for_display, mcc_phys_x_mesh, mcc_phys_y_mesh, dd_path)
+                    save_map_to_csv(dta_map_for_display, mcc_phys_x_mesh, mcc_phys_y_mesh, dta_path)
+            except Exception as e:
+                logger.error(f"Failed to save analysis maps to CSV: {e}", exc_info=True)
+
+        return gamma_map_for_display, gamma_stats, phys_extent, mcc_interp_data, dd_map_for_display, dta_map_for_display, dd_stats, dta_stats
+
     except Exception as e:
-        logger.error(f"감마 분석 오류: {str(e)}")
+        logger.error(f"Error during manual gamma analysis: {str(e)}")
         raise
