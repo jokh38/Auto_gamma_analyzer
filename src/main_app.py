@@ -11,41 +11,45 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QScrollArea, QGroupBox, QMessageBox)
 from typing import Optional
 
-from src.utils import logger
-from src.standard_data_model import StandardDoseData
-# 로더 임포트 방식 변경
-from src.load_dcm import load_dcm
-from src.load_mcc import load_mcc
-from src.ui_components import MatplotlibCanvas, ProfileDataTable, draw_image
-from src.analysis import extract_profile_data, perform_gamma_analysis
-from src.reporting import generate_report
+import sys
+import os
+from PyQt5 import QtWidgets
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                             QPushButton, QLabel, QSpinBox, QComboBox,
+                             QGridLayout, QScrollArea, QGroupBox)
+
+from src.data_manager import DataManager
+from src.ui_components import MatplotlibCanvas, ProfileDataTable, PlotManager
+from src.app_controller import AppController
 
 class GammaAnalysisApp(QMainWindow):
-    """2D 감마 분석 애플리케이션"""
+    """
+    The main window (View) of the application.
+    Responsibilities:
+    - Initializing and laying out UI components.
+    - Delegating all user actions to the AppController.
+    - Holding references to UI widgets that the controller may need to update.
+    """
     def __init__(self):
         super().__init__()
         
-        self.dicom_data: Optional[StandardDoseData] = None
-        self.mcc_data: Optional[StandardDoseData] = None
-        self.initial_dicom_phys_coords = None
-        self.initial_dicom_pixel_origin = None
-        self.profile_line = None
-        self.current_profile_data = None
+        # The view only holds the state of UI elements, not application data.
         self.profile_direction = "vertical"
-        self.dose_bounds = None
-        self.gamma_map = None
-        self.gamma_stats = None
-        self.phys_extent = None
-        self.mcc_interp_data = None
-        self.dd_map = None
-        self.dta_map = None
-        self.dd_stats = None
-        self.dta_stats = None
         
-        self.init_ui()
+        # Initialize managers and controller
+        self.data_manager = DataManager()
+        self.init_ui() # UI must be initialized before plot_manager
+        self.plot_manager = PlotManager(
+            self.data_manager, self.dicom_canvas, self.mcc_canvas,
+            self.profile_canvas, self.gamma_canvas, self.profile_table
+        )
+        self.controller = AppController(self, self.data_manager, self.plot_manager)
+
+        # Connect UI signals to controller methods
+        self.connect_signals()
 
     def init_ui(self):
-        """UI 컴포넌트 초기화"""
+        """Initializes and lays out all UI components."""
         self.setWindowTitle('2D Gamma Analysis')
         self.setGeometry(100, 100, 1000, 1000)
                 
@@ -57,7 +61,6 @@ class GammaAnalysisApp(QMainWindow):
         control_layout = QGridLayout(control_panel)
         
         self.load_dicom_btn = QPushButton("Load DICOM RT Dose")
-        # 버튼 텍스트를 좀 더 명확하게 변경
         self.load_measurement_btn = QPushButton("Load Measurement File")
 
         file_group = QGroupBox("File")
@@ -65,64 +68,54 @@ class GammaAnalysisApp(QMainWindow):
         file_layout.addWidget(self.load_dicom_btn)
         file_layout.addWidget(self.load_measurement_btn)
         
-        device_group = QGroupBox("Device Info")
-        device_layout = QVBoxLayout(device_group)
         self.device_label = QLabel("Device Type: Not detected")
         self.origin_label = QLabel("Origin: Not set")
+        device_group = QGroupBox("Device Info")
+        device_layout = QVBoxLayout(device_group)
         device_layout.addWidget(self.device_label)
         device_layout.addWidget(self.origin_label)
         
+        self.dicom_x_spin = QSpinBox()
+        self.dicom_x_spin.setRange(-2000, 2000)
+        self.dicom_y_spin = QSpinBox()
+        self.dicom_y_spin.setRange(-2000, 2000)
         origin_group = QGroupBox("Origin Adjustment")
         origin_layout = QGridLayout(origin_group)
         origin_layout.addWidget(QLabel("DICOM X (pixels):"), 0, 0)
-        self.dicom_x_spin = QSpinBox()
-        self.dicom_x_spin.setRange(-2000, 2000)
-        self.dicom_x_spin.valueChanged.connect(self.update_origin)
         origin_layout.addWidget(self.dicom_x_spin, 0, 1)
-        
         origin_layout.addWidget(QLabel("DICOM Y (pixels):"), 1, 0)
-        self.dicom_y_spin = QSpinBox()
-        self.dicom_y_spin.setRange(-2000, 2000)
-        self.dicom_y_spin.valueChanged.connect(self.update_origin)
         origin_layout.addWidget(self.dicom_y_spin, 1, 1)
         
+        self.vertical_btn = QPushButton("Vertical")
+        self.vertical_btn.setCheckable(True)
+        self.vertical_btn.setChecked(True)
+        self.horizontal_btn = QPushButton("Horizontal")
+        self.horizontal_btn.setCheckable(True)
         profile_dir_group = QGroupBox("Profile Direction")
         profile_dir_layout = QVBoxLayout(profile_dir_group)
-        self.vertical_btn = QPushButton("Vertical")
-        self.horizontal_btn = QPushButton("Horizontal")
-        self.vertical_btn.setCheckable(True)
-        self.horizontal_btn.setCheckable(True)
-        self.vertical_btn.setChecked(True)
-        
-        self.vertical_btn.clicked.connect(lambda: self.set_profile_direction("vertical"))
-        self.horizontal_btn.clicked.connect(lambda: self.set_profile_direction("horizontal"))
-        
         profile_dir_layout.addWidget(self.vertical_btn)
         profile_dir_layout.addWidget(self.horizontal_btn)
         
-        gamma_group = QGroupBox("Gamma Analysis Parameters")
-        gamma_layout = QGridLayout(gamma_group)
-        gamma_layout.addWidget(QLabel("DTA (mm):"), 0, 0)
         self.dta_spin = QSpinBox()
         self.dta_spin.setRange(1, 10)
         self.dta_spin.setValue(3)
-        gamma_layout.addWidget(self.dta_spin, 0, 1)
-        
-        gamma_layout.addWidget(QLabel("DD (%):"), 1, 0)
         self.dd_spin = QSpinBox()
         self.dd_spin.setRange(1, 10)
         self.dd_spin.setValue(3)
-        gamma_layout.addWidget(self.dd_spin, 1, 1)
-        
-        gamma_layout.addWidget(QLabel("Analysis Type:"), 2, 0)
         self.gamma_type_combo = QComboBox()
         self.gamma_type_combo.addItems(["Global", "Local"])
+        gamma_group = QGroupBox("Gamma Analysis Parameters")
+        gamma_layout = QGridLayout(gamma_group)
+        gamma_layout.addWidget(QLabel("DTA (mm):"), 0, 0)
+        gamma_layout.addWidget(self.dta_spin, 0, 1)
+        gamma_layout.addWidget(QLabel("DD (%):"), 1, 0)
+        gamma_layout.addWidget(self.dd_spin, 1, 1)
+        gamma_layout.addWidget(QLabel("Analysis Type:"), 2, 0)
         gamma_layout.addWidget(self.gamma_type_combo, 2, 1)
         
         self.run_gamma_btn = QPushButton("Run Gamma Analysis")
         self.generate_report_btn = QPushButton("Generate Report")
         self.generate_report_btn.setEnabled(False)
-
         run_report_group = QGroupBox("Execute")
         run_report_layout = QVBoxLayout(run_report_group)
         run_report_layout.addWidget(self.run_gamma_btn)
@@ -140,42 +133,30 @@ class GammaAnalysisApp(QMainWindow):
         viz_widget = QWidget()
         viz_layout = QGridLayout(viz_widget)
         
-        plot_size_policy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
-        fixed_width, fixed_height = 6, 5
-        
-        self.dicom_canvas = MatplotlibCanvas(self, width=fixed_width, height=fixed_height)
-        self.dicom_canvas.setSizePolicy(plot_size_policy)
+        self.dicom_canvas = MatplotlibCanvas(self)
         self.dicom_label = QLabel("DICOM RT Dose: None")
+        dicom_widget = QWidget()
+        QVBoxLayout(dicom_widget).addWidget(self.dicom_canvas)
+        QVBoxLayout(dicom_widget).addWidget(self.dicom_label)
         
-        self.mcc_canvas = MatplotlibCanvas(self, width=fixed_width, height=fixed_height)
-        self.mcc_canvas.setSizePolicy(plot_size_policy)
+        self.mcc_canvas = MatplotlibCanvas(self)
         self.mcc_label = QLabel("Measurement File: None")
+        mcc_widget = QWidget()
+        QVBoxLayout(mcc_widget).addWidget(self.mcc_canvas)
+        QVBoxLayout(mcc_widget).addWidget(self.mcc_label)
         
-        self.profile_canvas = MatplotlibCanvas(self, width=fixed_width, height=fixed_height)
-        self.profile_canvas.setSizePolicy(plot_size_policy)
-        
+        self.profile_canvas = MatplotlibCanvas(self)
         self.profile_table = ProfileDataTable()
         profile_scroll = QScrollArea()
         profile_scroll.setWidget(self.profile_table)
         profile_scroll.setWidgetResizable(True)
-        
         profile_widget = QWidget()
         profile_layout = QHBoxLayout(profile_widget)
         profile_layout.addWidget(self.profile_canvas, 2)
         profile_layout.addWidget(profile_scroll, 1)
         
-        self.gamma_canvas = MatplotlibCanvas(self, width=fixed_width, height=fixed_height)
-        self.gamma_canvas.setSizePolicy(plot_size_policy)
+        self.gamma_canvas = MatplotlibCanvas(self)
         self.gamma_stats_label = QLabel("Gamma Statistics: Not calculated")
-        
-        dicom_widget = QWidget()
-        QVBoxLayout(dicom_widget).addWidget(self.dicom_canvas)
-        QVBoxLayout(dicom_widget).addWidget(self.dicom_label)
-        
-        mcc_widget = QWidget()
-        QVBoxLayout(mcc_widget).addWidget(self.mcc_canvas)
-        QVBoxLayout(mcc_widget).addWidget(self.mcc_label)
-        
         gamma_widget = QWidget()
         QVBoxLayout(gamma_widget).addWidget(self.gamma_canvas)
         QVBoxLayout(gamma_widget).addWidget(self.gamma_stats_label)
@@ -186,224 +167,21 @@ class GammaAnalysisApp(QMainWindow):
         viz_layout.addWidget(gamma_widget, 1, 1)
         
         main_layout.addWidget(viz_widget)
+
+    def connect_signals(self):
+        """Connects all UI widget signals to the controller's methods."""
+        self.load_dicom_btn.clicked.connect(self.controller.load_dicom_file)
+        self.load_measurement_btn.clicked.connect(self.controller.load_measurement_file)
+        self.run_gamma_btn.clicked.connect(self.controller.run_gamma_analysis)
+        self.generate_report_btn.clicked.connect(self.controller.generate_report)
         
-        self.load_dicom_btn.clicked.connect(self.load_dicom_file)
-        self.load_measurement_btn.clicked.connect(self.load_measurement_file)
-        self.run_gamma_btn.clicked.connect(self.run_gamma_analysis)
-        self.generate_report_btn.clicked.connect(self.generate_report)
-        self.dicom_canvas.mpl_connect('button_press_event', self.on_dicom_click)
+        self.dicom_x_spin.valueChanged.connect(self.controller.update_origin)
+        self.dicom_y_spin.valueChanged.connect(self.controller.update_origin)
 
-    def _calculate_dose_bounds(self, data: StandardDoseData, threshold_percent=1, margin_mm=20):
-        if data is None: return None
-        max_dose = np.max(data.data_grid)
-        if max_dose <= 0: return None
-        threshold_val = (threshold_percent / 100.0) * max_dose
-        mask = data.data_grid >= threshold_val
-        if not np.any(mask): return None
-        rows, cols = np.where(mask)
-        min_phys_x = data.x_coords[cols.min()] - margin_mm
-        max_phys_x = data.x_coords[cols.max()] + margin_mm
-        min_phys_y = data.y_coords[rows.min()] - margin_mm
-        max_phys_y = data.y_coords[rows.max()] + margin_mm
-        return {'min_x': min_phys_x, 'max_x': max_phys_x, 'min_y': min_phys_y, 'max_y': max_phys_y}
+        self.vertical_btn.clicked.connect(lambda: self.controller.set_profile_direction("vertical"))
+        self.horizontal_btn.clicked.connect(lambda: self.controller.set_profile_direction("horizontal"))
 
-    def load_dicom_file(self):
-        options = QFileDialog.Options()
-        filename, _ = QFileDialog.getOpenFileName(self, "Open DICOM RT Dose File", "./", "DICOM Files (*.dcm);;All Files (*)", options=options)
-        if not filename: return
-        try:
-            self.dicom_data = load_dcm(filename)
-            self.dose_bounds = self._calculate_dose_bounds(self.dicom_data, threshold_percent=1, margin_mm=20)
-            self.initial_dicom_phys_coords = (self.dicom_data.x_coords.copy(), self.dicom_data.y_coords.copy())
-            pos_x, pos_y, _ = self.dicom_data.metadata['image_position_patient']
-            spacing_x, spacing_y = self.dicom_data.metadata['pixel_spacing']
-            pixel_origin_x = int(round(pos_x / spacing_x))
-            pixel_origin_y = int(round(pos_y / spacing_y))
-            self.initial_dicom_pixel_origin = (pixel_origin_x, pixel_origin_y)
-            self.dicom_x_spin.setValue(pixel_origin_x)
-            self.dicom_y_spin.setValue(pixel_origin_y)
-            self.redraw_all_images()
-            self.dicom_label.setText(f"DICOM RT Dose: {os.path.basename(filename)}")
-            self.origin_label.setText(f"DICOM Physical Origin: ({pos_x:.2f}, {pos_y:.2f}) mm")
-            if self.mcc_data is not None:
-                self.set_default_profile_and_generate()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load DICOM file: {e}")
-            logger.error(f"DICOM load error: {e}", exc_info=True)
-
-    def load_measurement_file(self):
-        """
-        확장성을 고려한 측정 파일 로더.
-        파일 필터에 따라 적절한 로더를 선택적으로 호출할 수 있음.
-        """
-        options = QFileDialog.Options()
-        # 향후 다른 장비 파일 추가 시 ";;Other Files (*.xxx)" 형식으로 추가 가능
-        file_filter = "MCC Files (*.mcc);;All Files (*)"
-        filename, selected_filter = QFileDialog.getOpenFileName(self, "Open Measurement File", "./", file_filter, options=options)
-
-        if not filename: return
-        
-        try:
-            # 선택된 필터나 파일 확장자를 기반으로 로더 선택
-            if filename.lower().endswith('.mcc'):
-                self.mcc_data = load_mcc(filename)
-                self.redraw_all_images()
-                meta = self.mcc_data.metadata
-                self.device_label.setText(f"Device Type: {meta['device']}")
-                self.mcc_label.setText(f"MCC File: {os.path.basename(filename)}")
-            else:
-                # 향후 다른 로더 호출 로직
-                QMessageBox.warning(self, "Warning", f"Unsupported file type: {os.path.basename(filename)}")
-                return
-
-            if self.dicom_data is not None:
-                self.set_default_profile_and_generate()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load measurement file: {e}")
-            logger.error(f"Measurement file load error: {e}", exc_info=True)
-
-    def set_default_profile_and_generate(self):
-        if self.profile_direction == "vertical":
-            self.profile_line = {"type": "vertical", "x": 0}
-        else:
-            self.profile_line = {"type": "horizontal", "y": 0}
-        self.redraw_all_images()
-        self.generate_profile()
-
-    def redraw_all_images(self):
-        if self.dicom_data:
-            draw_image(
-                canvas=self.dicom_canvas, image_data=self.dicom_data.data_grid,
-                extent=self.dicom_data.physical_extent, title='DICOM RT Dose',
-                colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
-                apply_cropping=True, crop_bounds=self.dose_bounds, line=self.profile_line
-            )
-        if self.mcc_data:
-            draw_image(
-                canvas=self.mcc_canvas, image_data=self.mcc_data.data_grid,
-                extent=self.mcc_data.physical_extent, title='MCC Data (Interpolated)',
-                colorbar_label='Dose', show_origin=True, show_colorbar=True,
-                apply_cropping=True, crop_bounds=self.dose_bounds, line=self.profile_line
-            )
-
-    def update_origin(self):
-        if not self.dicom_data or not self.initial_dicom_phys_coords:
-            return
-        spacing_x, spacing_y = self.dicom_data.metadata['pixel_spacing']
-        pixel_offset_x = self.dicom_x_spin.value() - self.initial_dicom_pixel_origin[0]
-        pixel_offset_y = self.dicom_y_spin.value() - self.initial_dicom_pixel_origin[1]
-        phys_offset_x = pixel_offset_x * spacing_x
-        phys_offset_y = pixel_offset_y * spacing_y
-        self.dicom_data.x_coords = self.initial_dicom_phys_coords[0] + phys_offset_x
-        self.dicom_data.y_coords = self.initial_dicom_phys_coords[1] + phys_offset_y
-        self.redraw_all_images()
-        self.generate_profile()
-
-    def set_profile_direction(self, direction):
-        self.profile_direction = direction
-        self.vertical_btn.setChecked(direction == "vertical")
-        self.horizontal_btn.setChecked(direction == "horizontal")
-        if self.dicom_data:
-            self.set_default_profile_and_generate()
-    
-    def on_dicom_click(self, event):
-        if event.inaxes != self.dicom_canvas.axes or not self.dicom_data: return
-        phys_x, phys_y = event.xdata, event.ydata
-        self.profile_line = {"type": self.profile_direction, "x": phys_x} if self.profile_direction == "vertical" else {"type": "horizontal", "y": phys_y}
-        self.redraw_all_images()
-        self.generate_profile()
-
-    def generate_profile(self):
-        if self.profile_line is None or not self.dicom_data: return
-        try:
-            fixed_pos = self.profile_line["x"] if self.profile_line["type"] == "vertical" else self.profile_line["y"]
-            self.current_profile_data = extract_profile_data(
-                direction=self.profile_line["type"], fixed_position=fixed_pos,
-                dicom_data=self.dicom_data, mcc_data=self.mcc_data
-            )
-            if not self.current_profile_data: return
-            self.profile_canvas.fig.clear()
-            self.profile_canvas.axes = self.profile_canvas.fig.add_subplot(111)
-            phys_coords = self.current_profile_data['phys_coords']
-            dicom_values = self.current_profile_data['dicom_values']
-            self.profile_canvas.axes.plot(phys_coords, dicom_values, 'b-', label='RT dose')
-            if 'mcc_interp' in self.current_profile_data:
-                self.profile_canvas.axes.plot(phys_coords, self.current_profile_data['mcc_interp'], 'r-', label='Measurement (interpolated)')
-                self.profile_canvas.axes.plot(self.current_profile_data['mcc_phys_coords'], self.current_profile_data['mcc_values'], 'ro', label='Measurement (original)', markersize=5)
-            x_label = "Y Position (mm)" if self.profile_direction == "vertical" else "X Position (mm)"
-            title_prefix = f"X={fixed_pos:.2f}mm" if self.profile_direction == "vertical" else f"Y={fixed_pos:.2f}mm"
-            self.profile_canvas.axes.set_xlabel(x_label)
-            self.profile_canvas.axes.set_ylabel('Dose (Gy)')
-            self.profile_canvas.axes.set_title(f'Dose Profile: {title_prefix}')
-            if self.dose_bounds:
-                lims = (self.dose_bounds['min_y'], self.dose_bounds['max_y']) if self.profile_direction == "vertical" else (self.dose_bounds['min_x'], self.dose_bounds['max_x'])
-                self.profile_canvas.axes.set_xlim(lims)
-            self.profile_canvas.axes.legend()
-            self.profile_canvas.axes.grid(True)
-            self.profile_canvas.fig.tight_layout()
-            self.profile_canvas.draw()
-            if 'mcc_phys_coords' in self.current_profile_data:
-                self.profile_table.update_data(self.current_profile_data['mcc_phys_coords'], self.current_profile_data['dicom_at_mcc'], self.current_profile_data['mcc_values'])
-            else:
-                self.profile_table.update_data(phys_coords, dicom_values)
-        except Exception as e:
-            logger.error(f"Profile generation error: {e}", exc_info=True)
-            QMessageBox.warning(self, "Warning", f"Could not generate profile: {e}")
-
-    def run_gamma_analysis(self):
-        if not self.dicom_data or not self.mcc_data:
-            QMessageBox.warning(self, "Warning", "Both DICOM and Measurement data must be loaded.")
-            return
-        try:            
-            dta, dd = self.dta_spin.value(), self.dd_spin.value()
-            is_global = self.gamma_type_combo.currentText() == "Global"
-            results = perform_gamma_analysis(self.mcc_data, self.dicom_data, dd, dta, is_global)
-            self.gamma_map, self.gamma_stats, self.phys_extent, self.mcc_interp_data, self.dd_map, self.dta_map, self.dd_stats, self.dta_stats = results
-            if 'pass_rate' in self.gamma_stats:
-                draw_image(
-                    canvas=self.gamma_canvas, image_data=self.gamma_map, extent=self.phys_extent,
-                    title=f'Gamma Analysis: Pass Rate = {self.gamma_stats["pass_rate"]:.2f}%',
-                    colorbar_label='Gamma Index', show_origin=True, show_colorbar=True,
-                    apply_cropping=True, crop_bounds=self.dose_bounds
-                )
-                stats_text = f"Gamma Stats: Pass = {self.gamma_stats['pass_rate']:.2f}% | Mean = {self.gamma_stats['mean']:.3f} | Max = {self.gamma_stats['max']:.3f}"
-                self.gamma_stats_label.setText(stats_text)
-                self.generate_report_btn.setEnabled(True)
-            else:
-                QMessageBox.warning(self, "Warning", "No valid gamma results.")
-                self.generate_report_btn.setEnabled(False)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Gamma analysis failed: {e}")
-            logger.error(f"Gamma analysis error: {e}", exc_info=True)
-            self.generate_report_btn.setEnabled(False)
-
-    def generate_report(self):
-        if self.gamma_stats is None:
-            QMessageBox.warning(self, "Warning", "Run gamma analysis first.")
-            return
-        try:
-            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            report_dir = os.path.join(base_dir, 'Report')
-            os.makedirs(report_dir, exist_ok=True)
-            patient_id = self.dicom_data.metadata.get('patient_id', 'Unknown')
-            dicom_filename_base = os.path.splitext(os.path.basename(self.dicom_data.metadata.get('filename', 'file')))[0]
-            default_path = os.path.join(report_dir, f"report_{patient_id}_{dicom_filename_base}.jpg")
-            output_path, _ = QFileDialog.getSaveFileName(self, "Save Report", default_path, "JPEG Image (*.jpg *.jpeg);;PDF Document (*.pdf)")
-            if not output_path: return
-            ver_profile = extract_profile_data("vertical", 0, self.dicom_data, self.mcc_data)
-            hor_profile = extract_profile_data("horizontal", 0, self.dicom_data, self.mcc_data)
-            generate_report(
-                output_path=output_path, dicom_data=self.dicom_data, mcc_data=self.mcc_data,
-                gamma_map=self.gamma_map, gamma_stats=self.gamma_stats,
-                dta=self.dta_spin.value(), dd=self.dd_spin.value(), suppression_level=10,
-                ver_profile_data=ver_profile, hor_profile_data=hor_profile,
-                mcc_interp_data=self.mcc_interp_data, dd_stats=self.dd_stats, dta_stats=self.dta_stats,
-                dose_bounds=self.dose_bounds
-            )
-            QMessageBox.information(self, "Success", f"Report saved to:\n{output_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to generate report: {e}")
-            logger.error(f"Report generation error: {e}", exc_info=True)
+        self.dicom_canvas.mpl_connect('button_press_event', self.controller.on_dicom_click_handler)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
