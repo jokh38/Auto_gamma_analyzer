@@ -9,6 +9,7 @@ from src.load_dcm import load_dcm
 from src.load_mcc import load_mcc
 from src.analysis import perform_gamma_analysis
 from src.reporting import generate_report
+from src.standard_data_model import ROI_Data
 
 class AppController:
     """
@@ -28,8 +29,8 @@ class AppController:
         dm = self.data_manager
         view = self.main_view
 
-        if not dm.dicom_data or not dm.mcc_data:
-            QMessageBox.warning(view, "Warning", "Both DICOM and Measurement data must be loaded.")
+        if not dm.dicom_roi or not dm.mcc_roi:
+            QMessageBox.warning(view, "Warning", "Both DICOM and Measurement data must be loaded and have valid ROIs.")
             return
 
         try:
@@ -37,7 +38,13 @@ class AppController:
             dd = view.dd_spin.value()
             is_global = view.gamma_type_combo.currentText() == "Global"
 
-            results = perform_gamma_analysis(dm.mcc_data, dm.dicom_data, dd, dta, is_global)
+            results = perform_gamma_analysis(
+                reference_roi=dm.mcc_roi,
+                evaluation_roi=dm.dicom_roi,
+                dose_percent_threshold=dd,
+                distance_mm_threshold=dta,
+                global_normalisation=is_global
+            )
             (
                 dm.gamma_map, dm.gamma_stats, dm.phys_extent, dm.mcc_interp_data,
                 dm.dd_map, dm.dta_map, dm.dd_stats, dm.dta_stats
@@ -58,27 +65,64 @@ class AppController:
             logger.error(f"Gamma analysis error: {e}", exc_info=True)
             view.generate_report_btn.setEnabled(False)
 
-    def _calculate_dose_bounds(self, data, threshold_percent=1, margin_mm=20):
-        if data is None: return None
+    def _extract_roi_from_data(self, data, threshold_percent=1.0):
+        """
+        Identifies a Region of Interest (ROI) based on a dose threshold
+        and extracts all relevant data into an ROI_Data object.
+        """
+        if data is None:
+            return None
+
         max_dose = np.max(data.data_grid)
-        if max_dose <= 0: return None
+        if max_dose <= 0:
+            return None
+
+        # Determine the ROI based on the threshold
         threshold_val = (threshold_percent / 100.0) * max_dose
         mask = data.data_grid >= threshold_val
-        if not np.any(mask): return None
+        if not np.any(mask):
+            return None
+
+        # Find the bounding box of the mask in terms of indices
         rows, cols = np.where(mask)
-        min_phys_x = data.x_coords[cols.min()] - margin_mm
-        max_phys_x = data.x_coords[cols.max()] + margin_mm
-        min_phys_y = data.y_coords[rows.min()] - margin_mm
-        max_phys_y = data.y_coords[rows.max()] + margin_mm
-        return {'min_x': min_phys_x, 'max_x': max_phys_x, 'min_y': min_phys_y, 'max_y': max_phys_y}
+        min_row, max_row = rows.min(), rows.max()
+        min_col, max_col = cols.min(), cols.max()
+
+        # Extract the data for the ROI
+        y_indices = np.arange(min_row, max_row + 1)
+        x_indices = np.arange(min_col, max_col + 1)
+
+        roi_grid = data.data_grid[min_row:max_row+1, min_col:max_col+1]
+        y_coords = data.y_coords[y_indices]
+        x_coords = data.x_coords[x_indices]
+
+        # Calculate physical extent for plotting, considering pixel edges
+        dx = (x_coords[1] - x_coords[0]) / 2.0 if len(x_coords) > 1 else 0.5
+        dy = (y_coords[1] - y_coords[0]) / 2.0 if len(y_coords) > 1 else 0.5
+        physical_extent = [
+            x_coords[0] - dx, x_coords[-1] + dx,
+            y_coords[0] - dy, y_coords[-1] + dy
+        ]
+
+        # Create and return the ROI_Data object
+        return ROI_Data(
+            dose_grid=roi_grid,
+            x_coords=x_coords,
+            y_coords=y_coords,
+            x_indices=x_indices,
+            y_indices=y_indices,
+            physical_extent=physical_extent,
+            source_metadata=data.metadata.copy()
+        )
 
     def load_dicom_file(self):
         options = QFileDialog.Options()
         filename, _ = QFileDialog.getOpenFileName(self.main_view, "Open DICOM RT Dose File", "./", "DICOM Files (*.dcm);;All Files (*)", options=options)
         if not filename: return
         try:
-            self.data_manager.dicom_data = load_dcm(filename)
-            self.data_manager.dose_bounds = self._calculate_dose_bounds(self.data_manager.dicom_data)
+            dicom_data = load_dcm(filename)
+            self.data_manager.dicom_data = dicom_data
+            self.data_manager.dicom_roi = self._extract_roi_from_data(dicom_data)
             self.data_manager.initial_dicom_phys_coords = (self.data_manager.dicom_data.x_coords.copy(), self.data_manager.dicom_data.y_coords.copy())
             pos_x, pos_y, _ = self.data_manager.dicom_data.metadata['image_position_patient']
             spacing_x, spacing_y = self.data_manager.dicom_data.metadata['pixel_spacing']
@@ -102,7 +146,9 @@ class AppController:
         if not filename: return
         try:
             if filename.lower().endswith('.mcc'):
-                self.data_manager.mcc_data = load_mcc(filename)
+                mcc_data = load_mcc(filename)
+                self.data_manager.mcc_data = mcc_data
+                self.data_manager.mcc_roi = self._extract_roi_from_data(mcc_data)
                 self.plot_manager.redraw_all_images()
                 meta = self.data_manager.mcc_data.metadata
                 self.main_view.device_label.setText(f"Device Type: {meta['device']}")
@@ -176,13 +222,15 @@ class AppController:
             hor_profile = self.plot_manager.generate_profile_data()
             self.data_manager.profile_line = original_profile_line
 
+            # The dose_bounds argument is replaced by the ROI's extent.
+            report_extent = self.data_manager.dicom_roi.physical_extent if self.data_manager.dicom_roi else None
             generate_report(
                 output_path=output_path, dicom_data=self.data_manager.dicom_data, mcc_data=self.data_manager.mcc_data,
                 gamma_map=self.data_manager.gamma_map, gamma_stats=self.data_manager.gamma_stats,
                 dta=self.main_view.dta_spin.value(), dd=self.main_view.dd_spin.value(), suppression_level=10,
                 ver_profile_data=ver_profile, hor_profile_data=hor_profile,
                 mcc_interp_data=self.data_manager.mcc_interp_data, dd_stats=self.data_manager.dd_stats, dta_stats=self.data_manager.dta_stats,
-                dose_bounds=self.data_manager.dose_bounds
+                dose_bounds=report_extent
             )
             QMessageBox.information(self.main_view, "Success", f"Report saved to:\n{output_path}")
         except Exception as e:

@@ -62,3 +62,29 @@ class StandardDoseData:
             self.y_coords[0] - dy,
             self.y_coords[-1] + dy
         ]
+
+@dataclass
+class ROI_Data:
+    """
+    Holds data for a specific Region of Interest (ROI).
+
+    This object contains not only the cropped dose grid but also the
+    corresponding coordinates and indices from the original data,
+    facilitating analysis without repeated calculations.
+
+    Attributes:
+        dose_grid (np.ndarray): 2D array of dose values within the ROI.
+        x_coords (np.ndarray): 1D array of physical X-coordinates for the ROI.
+        y_coords (np.ndarray): 1D array of physical Y-coordinates for the ROI.
+        x_indices (np.ndarray): 1D array of original column indices for the ROI.
+        y_indices (np.ndarray): 1D array of original row indices for the ROI.
+        physical_extent (list[float]): Physical boundaries [xmin, xmax, ymin, ymax].
+        source_metadata (dict): Metadata from the source StandardDoseData.
+    """
+    dose_grid: np.ndarray
+    x_coords: np.ndarray
+    y_coords: np.ndarray
+    x_indices: np.ndarray
+    y_indices: np.ndarray
+    physical_extent: list[float]
+    source_metadata: dict
