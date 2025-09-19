@@ -117,6 +117,8 @@ class TestAppController(unittest.TestCase):
         mock_roi_data.physical_extent = [0,1,0,1]
         mock_roi_data.x_coords = np.array([0])
         mock_roi_data.y_coords = np.array([0])
+        # Add source_metadata to prevent AttributeError in the modified generate_profile_data
+        mock_roi_data.source_metadata = {}
         self.controller._extract_roi_from_data = MagicMock(return_value=mock_roi_data)
 
         # 2. When: Call the load_dicom_file method
