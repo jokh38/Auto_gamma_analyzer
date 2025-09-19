@@ -6,21 +6,19 @@ import numpy as np
 from scipy.interpolate import griddata, interp1d
 from typing import Optional
 
-from .standard_data_model import StandardDoseData
+from .standard_data_model import StandardDoseData, ROI_Data
 from .utils import logger, find_nearest_index, save_map_to_csv
 import os
 
 def extract_profile_data(direction: str, fixed_position: float,
-                         dicom_data: StandardDoseData,
-                         mcc_data: Optional[StandardDoseData] = None) -> Optional[dict]:
+                         roi_data: StandardDoseData) -> Optional[dict]:
     """
-    Extracts profile data from standardized DICOM and MCC data objects.
+    Extracts profile data from a single ROI_Data object.
 
     Args:
         direction: "vertical" or "horizontal".
-        fixed_position: The fixed position in mm.
-        dicom_data: The standardized DICOM data object.
-        mcc_data: The standardized MCC data object (optional).
+        fixed_position: The fixed physical position (in mm) of the profile.
+        roi_data: The ROI_Data object to extract the profile from.
 
     Returns:
         A dictionary containing the profile data, or None if extraction fails.
@@ -28,45 +26,25 @@ def extract_profile_data(direction: str, fixed_position: float,
     profile_data = {'type': direction, 'fixed_pos': fixed_position}
     
     try:
-        # 1. Extract DICOM profile (always present)
         if direction == "vertical":
             # Vertical profile: x is fixed, y is the profile axis
-            fixed_axis_coords = dicom_data.x_coords
-            profile_axis_coords = dicom_data.y_coords
+            fixed_axis_coords = roi_data.x_coords
+            profile_axis_coords = roi_data.y_coords
             closest_idx = find_nearest_index(fixed_axis_coords, fixed_position)
-            dicom_values = dicom_data.data_grid[:, closest_idx]
+            dicom_values = roi_data.dose_grid[:, closest_idx]
         else:  # "horizontal"
             # Horizontal profile: y is fixed, x is the profile axis
-            fixed_axis_coords = dicom_data.y_coords
-            profile_axis_coords = dicom_data.x_coords
+            fixed_axis_coords = roi_data.y_coords
+            profile_axis_coords = roi_data.x_coords
             closest_idx = find_nearest_index(fixed_axis_coords, fixed_position)
-            dicom_values = dicom_data.data_grid[closest_idx, :]
+            dicom_values = roi_data.dose_grid[closest_idx, :]
 
         profile_data['phys_coords'] = profile_axis_coords
         profile_data['dicom_values'] = dicom_values
 
-        # 2. Process MCC data if available
-        if mcc_data:
-            # For smooth plotting, interpolate the dense MCC grid onto the DICOM profile coordinates
-            if direction == "vertical":
-                # Create an interpolator for the MCC data along the y-axis at the given x
-                mcc_interp_func = interp1d(mcc_data.y_coords, mcc_data.data_grid[:, find_nearest_index(mcc_data.x_coords, fixed_position)],
-                                           bounds_error=False, fill_value=np.nan)
-                profile_data['mcc_interp'] = mcc_interp_func(profile_axis_coords)
-            else: # horizontal
-                mcc_interp_func = interp1d(mcc_data.x_coords, mcc_data.data_grid[find_nearest_index(mcc_data.y_coords, fixed_position), :],
-                                           bounds_error=False, fill_value=np.nan)
-                profile_data['mcc_interp'] = mcc_interp_func(profile_axis_coords)
-
-            # For the table, provide the original MCC points and corresponding DICOM values
-            if 'original_points' in mcc_data.metadata:
-                original_mcc = mcc_data.metadata['original_points']
-                profile_data['mcc_phys_coords'] = original_mcc['coords'][:, 0 if direction == 'horizontal' else 1]
-                profile_data['mcc_values'] = original_mcc['values']
-                
-                # Find corresponding DICOM values at these original MCC points
-                dicom_interp_func = interp1d(profile_axis_coords, dicom_values, bounds_error=False, fill_value=np.nan)
-                profile_data['dicom_at_mcc'] = dicom_interp_func(profile_data['mcc_phys_coords'])
+        # Note: MCC data processing has been removed from this function.
+        # It will be handled at a higher level (e.g., in PlotManager)
+        # to keep this function focused on simple data extraction from an ROI.
 
         return profile_data
         
@@ -74,21 +52,20 @@ def extract_profile_data(direction: str, fixed_position: float,
         logger.error(f"Profile data extraction error: {e}", exc_info=True)
         return None
 
-def perform_gamma_analysis(reference_data: StandardDoseData, evaluation_data: StandardDoseData,
+def perform_gamma_analysis(reference_roi: ROI_Data, evaluation_roi: ROI_Data,
                            dose_percent_threshold: float, distance_mm_threshold: float,
-                           global_normalisation: bool = True, threshold: int = 10,
+                           global_normalisation: bool = True,
                            save_csv: bool = False, csv_dir: Optional[str] = None):
     """
-    Performs gamma analysis using sparse reference points (from MCC metadata)
-    against a dense evaluation grid (DICOM).
+    Performs gamma analysis using data from ROI objects.
+    The ROI data is assumed to be pre-filtered, so no internal dose thresholding is done.
 
     Args:
-        reference_data: Standardized data for reference (MCC), must contain 'original_points' in metadata.
-        evaluation_data: Standardized data for evaluation (DICOM).
+        reference_roi: ROI_Data object for the reference dose (e.g., from MCC).
+        evaluation_roi: ROI_Data object for the evaluation dose (e.g., from DICOM).
         dose_percent_threshold: Dose difference criterion (%).
         distance_mm_threshold: DTA criterion (mm).
         global_normalisation: Whether to use global normalization.
-        threshold: Lower dose threshold for analysis (%).
         save_csv: Whether to save analysis maps to CSV.
         csv_dir: Directory to save CSV files.
 
@@ -96,38 +73,27 @@ def perform_gamma_analysis(reference_data: StandardDoseData, evaluation_data: St
         A tuple containing gamma maps, stats, and other analysis results.
     """
     try:
-        # --- Step 1: Extract and filter reference data from metadata ---
-        if 'original_points' not in reference_data.metadata:
-            raise ValueError("Reference data must contain 'original_points' in metadata for sparse gamma analysis.")
-        
-        all_mcc_coords_phys = reference_data.metadata['original_points']['coords']
-        all_mcc_dose_values = reference_data.metadata['original_points']['values']
+        # --- Step 1: Extract data from ROI objects ---
+        # The core assumption is that the reference data comes from the MCC's original points,
+        # which are stored in the metadata.
+        if 'original_points' not in reference_roi.source_metadata:
+            raise ValueError("Reference ROI must contain 'original_points' in source_metadata for gamma analysis.")
 
-        if all_mcc_coords_phys.size == 0:
-            raise ValueError("No valid measurement data in reference file.")
+        points_ref = reference_roi.source_metadata['original_points']['coords']
+        doses_ref = reference_roi.source_metadata['original_points']['values']
 
-        norm_dose = np.max(all_mcc_dose_values) if global_normalisation else 1.0
+        if points_ref.size == 0:
+            raise ValueError("No valid measurement data in reference ROI.")
+
+        norm_dose = np.max(doses_ref) if global_normalisation else 1.0
         if norm_dose == 0:
             raise ValueError("Cannot determine normalization dose (max reference dose is zero).")
 
-        threshold_dose = (threshold / 100.0) * norm_dose
-        analysis_mask = all_mcc_dose_values >= threshold_dose
-
-        # --- Step 2: Extract evaluation data ---
-        eval_grid = evaluation_data.data_grid
-        eval_x_coords = evaluation_data.x_coords
-        eval_y_coords = evaluation_data.y_coords
-        phys_extent = evaluation_data.physical_extent
-
-        if not np.any(analysis_mask):
-            logger.warning(f"No reference points above the {threshold}% dose threshold. Skipping analysis.")
-            # Return empty/default values
-            empty_stats = {'pass_rate': 100, 'mean': 0, 'max': 0, 'min': 0, 'total_points': 0}
-            empty_map = np.full_like(reference_data.data_grid, np.nan)
-            return empty_map, empty_stats, phys_extent, reference_data.data_grid, empty_map, empty_map, empty_stats, empty_stats
-
-        points_ref = all_mcc_coords_phys[analysis_mask]
-        doses_ref = all_mcc_dose_values[analysis_mask]
+        # --- Step 2: Extract evaluation data from the evaluation ROI ---
+        eval_grid = evaluation_roi.dose_grid
+        eval_x_coords = evaluation_roi.x_coords
+        eval_y_coords = evaluation_roi.y_coords
+        phys_extent = evaluation_roi.physical_extent
 
         # --- Step 3: Perform gamma calculation ---
         dta_criteria_sq = distance_mm_threshold ** 2
@@ -166,7 +132,7 @@ def perform_gamma_analysis(reference_data: StandardDoseData, evaluation_data: St
             dta_values[i] = np.sqrt(dist_sq[min_idx]) / distance_mm_threshold
 
         # --- Step 4: Create dense maps and calculate statistics ---
-        grid_x, grid_y = np.meshgrid(reference_data.x_coords, reference_data.y_coords)
+        grid_x, grid_y = np.meshgrid(reference_roi.x_coords, reference_roi.y_coords)
 
         gamma_map = griddata(points_ref, gamma_values, (grid_x, grid_y), method='cubic', fill_value=np.nan)
         dd_map = griddata(points_ref, dd_values, (grid_x, grid_y), method='cubic', fill_value=np.nan)
@@ -193,13 +159,13 @@ def perform_gamma_analysis(reference_data: StandardDoseData, evaluation_data: St
 
         logger.info(f"Gamma analysis complete: {gamma_stats['total_points']} points analyzed, pass rate {gamma_stats['pass_rate']:.1f}%")
 
-        # The interpolated MCC data for visualization is now just the reference data grid
-        mcc_interp_data = reference_data.data_grid
+        # The interpolated MCC data for visualization is now just the reference ROI's dose grid
+        mcc_interp_data = reference_roi.dose_grid
 
         # --- Step 5: Save maps to CSV (Optional) ---
         if save_csv and csv_dir:
             try:
-                base_filename = os.path.splitext(os.path.basename(reference_data.metadata.get('filename', 'mcc')))[0]
+                base_filename = os.path.splitext(os.path.basename(reference_roi.source_metadata.get('filename', 'mcc')))[0]
                 if gamma_stats['total_points'] > 0:
                     save_map_to_csv(gamma_map, grid_x, grid_y, os.path.join(csv_dir, f"{base_filename}_gamma.csv"))
                     save_map_to_csv(dd_map, grid_x, grid_y, os.path.join(csv_dir, f"{base_filename}_dd.csv"))

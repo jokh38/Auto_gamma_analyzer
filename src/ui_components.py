@@ -48,12 +48,10 @@ class ProfileDataTable(QTableWidget):
 
 
 def draw_image(canvas, image_data, extent, title, colorbar_label=None,
-               show_origin=True, show_colorbar=True, apply_cropping=False,
-               crop_bounds=None, line=None):
+               show_origin=True, show_colorbar=True, line=None):
     """
     통합된 이미지 그리기 함수.
-    모든 데이터는 StandardDoseData 모델을 통해 좌표계가 통일되었으므로,
-    조건부로 이미지를 뒤집는 로직을 제거했습니다.
+    이제 크롭된 ROI 데이터를 직접 받으므로, 확대/크롭 관련 로직이 제거되었습니다.
     """
     canvas.fig.clear()
     canvas.axes = canvas.fig.add_subplot(111)
@@ -68,10 +66,6 @@ def draw_image(canvas, image_data, extent, title, colorbar_label=None,
     
     if show_colorbar and colorbar_label is not None:
         canvas.fig.colorbar(im, ax=canvas.axes, label=colorbar_label)
-    
-    if apply_cropping and crop_bounds is not None:
-        canvas.axes.set_xlim(crop_bounds['min_x'], crop_bounds['max_x'])
-        canvas.axes.set_ylim(crop_bounds['min_y'], crop_bounds['max_y'])
     
     if show_origin:
         canvas.axes.plot(0, 0, 'wo', markersize=3, markeredgecolor='black')
@@ -117,11 +111,15 @@ class PlotManager:
 
         fixed_pos = dm.profile_line.get("x") if dm.profile_line.get("type") == "vertical" else dm.profile_line.get("y")
 
+        # The new profile extraction works on a single ROI.
+        # We'll use the DICOM ROI as the primary source for profiles.
+        if not dm.dicom_roi:
+            return None
+
         profile_data = extract_profile_data(
             direction=dm.profile_line["type"],
             fixed_position=fixed_pos,
-            dicom_data=dm.dicom_data,
-            mcc_data=dm.mcc_data
+            roi_data=dm.dicom_roi
         )
 
         return profile_data
@@ -151,8 +149,9 @@ class PlotManager:
             self.profile_canvas.axes.set_ylabel('Dose (Gy)')
             self.profile_canvas.axes.set_title(f'Dose Profile: {title_prefix}')
 
-            if self.data_manager.dose_bounds:
-                lims = (self.data_manager.dose_bounds['min_y'], self.data_manager.dose_bounds['max_y']) if profile_direction == "vertical" else (self.data_manager.dose_bounds['min_x'], self.data_manager.dose_bounds['max_x'])
+            if self.data_manager.dicom_roi:
+                extent = self.data_manager.dicom_roi.physical_extent
+                lims = (extent[2], extent[3]) if profile_direction == "vertical" else (extent[0], extent[1])
                 self.profile_canvas.axes.set_xlim(lims)
 
             self.profile_canvas.axes.legend()
@@ -172,21 +171,21 @@ class PlotManager:
             print(f"Error drawing profile: {e}") # Using print for now, logger would be better
 
     def redraw_all_images(self):
-        """Redraws the DICOM and MCC images."""
+        """Redraws the DICOM and MCC images using ROI data."""
         dm = self.data_manager
-        if dm.dicom_data:
+        if dm.dicom_roi:
             draw_image(
-                canvas=self.dicom_canvas, image_data=dm.dicom_data.data_grid,
-                extent=dm.dicom_data.physical_extent, title='DICOM RT Dose',
+                canvas=self.dicom_canvas, image_data=dm.dicom_roi.dose_grid,
+                extent=dm.dicom_roi.physical_extent, title='DICOM RT Dose (ROI)',
                 colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
-                apply_cropping=True, crop_bounds=dm.dose_bounds, line=dm.profile_line
+                line=dm.profile_line
             )
-        if dm.mcc_data:
+        if dm.mcc_roi:
             draw_image(
-                canvas=self.mcc_canvas, image_data=dm.mcc_data.data_grid,
-                extent=dm.mcc_data.physical_extent, title='MCC Data (Interpolated)',
+                canvas=self.mcc_canvas, image_data=dm.mcc_roi.dose_grid,
+                extent=dm.mcc_roi.physical_extent, title='MCC Data (ROI)',
                 colorbar_label='Dose', show_origin=True, show_colorbar=True,
-                apply_cropping=True, crop_bounds=dm.dose_bounds, line=dm.profile_line
+                line=dm.profile_line
             )
 
     def draw_gamma_map(self):
@@ -196,8 +195,7 @@ class PlotManager:
             draw_image(
                 canvas=self.gamma_canvas, image_data=dm.gamma_map, extent=dm.phys_extent,
                 title=f'Gamma Analysis: Pass Rate = {dm.gamma_stats["pass_rate"]:.2f}%',
-                colorbar_label='Gamma Index', show_origin=True, show_colorbar=True,
-                apply_cropping=True, crop_bounds=dm.dose_bounds
+                colorbar_label='Gamma Index', show_origin=True, show_colorbar=True
             )
         else:
             # Clear the canvas if there's no data
