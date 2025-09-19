@@ -341,7 +341,7 @@ class GammaAnalysisApp(QMainWindow):
         """DICOM 원점 x좌표 업데이트"""
         if self.dicom_handler.get_pixel_data() is None: return
         self.dicom_handler.dicom_origin_x = self.dicom_x_spin.value()
-        self.dicom_handler.create_physical_coordinates()
+        self.dicom_handler.create_physical_coordinates_dcm()
         self.dicom_origin_x, _ = self.dicom_handler.get_origin_coords()
         self.redraw_all_images()
     
@@ -349,7 +349,7 @@ class GammaAnalysisApp(QMainWindow):
         """DICOM 원점 y좌표 업데이트"""
         if self.dicom_handler.get_pixel_data() is None: return
         self.dicom_handler.dicom_origin_y = self.dicom_y_spin.value()
-        self.dicom_handler.create_physical_coordinates()
+        self.dicom_handler.create_physical_coordinates_dcm()
         _, self.dicom_origin_y = self.dicom_handler.get_origin_coords()
         self.redraw_all_images()
 

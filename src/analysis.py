@@ -35,21 +35,21 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
             fixed_axis_coords_dicom = dicom_handler.phys_x_mesh[0, :]
             profile_axis_mesh_dicom = dicom_handler.phys_y_mesh
             slicer_dicom = lambda idx: (slice(None), idx)
+            sort_required = True  # y-axis is inverted and needs sorting for interpolation
             if mcc_handler:
                 mcc_fixed_axis_coords = mcc_handler.phys_x_mesh[0, :]
                 mcc_profile_axis_mesh = mcc_handler.phys_y_mesh
                 slicer_mcc = lambda idx: (slice(None), idx)
-                sort_required = True  # MCC y-axis is inverted and needs sorting for interpolation
         else:  # "horizontal"
             # Horizontal profile: y is fixed, x is the profile axis
             fixed_axis_coords_dicom = dicom_handler.phys_y_mesh[:, 0]
             profile_axis_mesh_dicom = dicom_handler.phys_x_mesh
             slicer_dicom = lambda idx: (idx, slice(None))
+            sort_required = False # x-axis is already sorted
             if mcc_handler:
                 mcc_fixed_axis_coords = mcc_handler.phys_y_mesh[:, 0]
                 mcc_profile_axis_mesh = mcc_handler.phys_x_mesh
                 slicer_mcc = lambda idx: (idx, slice(None))
-                sort_required = False # MCC x-axis is already sorted
 
         # --- Common Logic for both directions ---
 
