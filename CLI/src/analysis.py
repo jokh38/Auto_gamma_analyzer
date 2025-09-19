@@ -39,7 +39,6 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
                 mcc_fixed_axis_coords = mcc_handler.phys_x_mesh[0, :]
                 mcc_profile_axis_mesh = mcc_handler.phys_y_mesh
                 slicer_mcc = lambda idx: (slice(None), idx)
-                sort_required = True  # MCC y-axis is inverted and needs sorting for interpolation
         else:  # "horizontal"
             # Horizontal profile: y is fixed, x is the profile axis
             fixed_axis_coords_dicom = dicom_handler.phys_y_mesh[:, 0]
@@ -49,7 +48,6 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
                 mcc_fixed_axis_coords = mcc_handler.phys_y_mesh[:, 0]
                 mcc_profile_axis_mesh = mcc_handler.phys_x_mesh
                 slicer_mcc = lambda idx: (idx, slice(None))
-                sort_required = False # MCC x-axis is already sorted
 
         # --- Common Logic for both directions ---
 
@@ -58,56 +56,104 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
         profile_coords_dicom = profile_axis_mesh_dicom[slicer_dicom(closest_idx_dicom)]
         dicom_values = dicom_image[slicer_dicom(closest_idx_dicom)]
 
-        # For vertical profiles, the physical y-coordinate is descending.
-        # To ensure consistency for interpolation and plotting, we make it ascending.
-        if sort_required:
-            # Reverse both arrays to sort them in ascending order of coordinates.
-            profile_coords_dicom = profile_coords_dicom[::-1]
-            dicom_values = dicom_values[::-1]
-        
+        # DEBUG LOGGING for DICOM data
+        if direction == "vertical":
+            logger.info(f"=== DICOM VERTICAL PROFILE DEBUG ===")
+            logger.info(f"DICOM fixed axis coords shape: {fixed_axis_coords_dicom.shape}")
+            logger.info(f"DICOM fixed axis coords range: {fixed_axis_coords_dicom.min():.2f} to {fixed_axis_coords_dicom.max():.2f} mm")
+            logger.info(f"Closest DICOM index for x={fixed_position}: {closest_idx_dicom}")
+            logger.info(f"Actual DICOM x-coord at index {closest_idx_dicom}: {fixed_axis_coords_dicom[closest_idx_dicom]:.2f} mm")
+            logger.info(f"DICOM profile axis mesh shape: {profile_axis_mesh_dicom.shape}")
+            logger.info(f"DICOM profile coords shape: {profile_coords_dicom.shape}")
+            logger.info(f"DICOM y-coords range: {profile_coords_dicom.min():.2f} to {profile_coords_dicom.max():.2f} mm")
+            logger.info(f"DICOM values shape: {dicom_values.shape}")
+            logger.info(f"DICOM dose range: {dicom_values.min():.3f} to {dicom_values.max():.3f}")
+
         profile_data['phys_coords'] = profile_coords_dicom
         profile_data['dicom_values'] = dicom_values
 
         # 2. Process MCC data if available
         if mcc_handler and mcc_handler.get_matrix_data() is not None:
             mcc_image = mcc_handler.get_matrix_data()
-            
+
             closest_idx_mcc = find_nearest_index(mcc_fixed_axis_coords, fixed_position)
             mcc_line_values = mcc_image[slicer_mcc(closest_idx_mcc)]
-            
-            valid_indices = np.where(mcc_line_values >= 0)[0]
-            
+
+            # DEBUG LOGGING for vertical profile
+            if direction == "vertical":
+                logger.info(f"=== VERTICAL PROFILE DEBUG ===")
+                logger.info(f"Fixed position (x): {fixed_position} mm")
+                logger.info(f"MCC fixed axis coords shape: {mcc_fixed_axis_coords.shape}")
+                logger.info(f"MCC fixed axis coords range: {mcc_fixed_axis_coords.min():.2f} to {mcc_fixed_axis_coords.max():.2f} mm")
+                logger.info(f"Closest MCC index for x={fixed_position}: {closest_idx_mcc}")
+                logger.info(f"Actual MCC x-coord at index {closest_idx_mcc}: {mcc_fixed_axis_coords[closest_idx_mcc]:.2f} mm")
+                logger.info(f"MCC image shape: {mcc_image.shape}")
+                logger.info(f"MCC line values shape (column {closest_idx_mcc}): {mcc_line_values.shape}")
+                logger.info(f"MCC line values range: {mcc_line_values.min():.3f} to {mcc_line_values.max():.3f}")
+                logger.info(f"MCC line non-zero count: {np.sum(mcc_line_values > 0)}")
+                logger.info(f"MCC profile axis mesh shape: {mcc_profile_axis_mesh.shape}")
+                logger.info(f"MCC y-coords range: {mcc_profile_axis_mesh.min():.2f} to {mcc_profile_axis_mesh.max():.2f} mm")
+
+            # Use > 0 instead of >= 0 to show only non-zero measurement values
+            valid_indices = np.where(mcc_line_values > 0)[0]
+
+            logger.info(f"Valid MCC indices found: {len(valid_indices)} points")
+            if len(valid_indices) > 0:
+                logger.info(f"Valid indices: {valid_indices[:10]}..." if len(valid_indices) > 10 else f"Valid indices: {valid_indices}")
+
             if len(valid_indices) > 0:
                 # Get physical coordinates and dose values for valid MCC points
                 if direction == "vertical":
+                    # For vertical profile: fixed x (column), varying y (rows)
+                    # valid_indices are row indices, closest_idx_mcc is column index
                     mcc_phys_coords = mcc_profile_axis_mesh[valid_indices, closest_idx_mcc]
+                    logger.info(f"MCC y-coordinates for valid points: {mcc_phys_coords[:5]}..." if len(mcc_phys_coords) > 5 else f"MCC y-coordinates: {mcc_phys_coords}")
+                    logger.info(f"MCC y-coords range for valid points: {mcc_phys_coords.min():.2f} to {mcc_phys_coords.max():.2f} mm")
                 else: # horizontal
+                    # For horizontal profile: fixed y (row), varying x (columns)
+                    # valid_indices are column indices, closest_idx_mcc is row index
                     mcc_phys_coords = mcc_profile_axis_mesh[closest_idx_mcc, valid_indices]
-                
-                mcc_values = mcc_line_values[valid_indices]
 
-                # For vertical profiles, the physical y-coordinate is descending.
-                # We sort it here to ensure all subsequent operations use ascending coordinates.
-                if sort_required:
-                    mcc_phys_coords = mcc_phys_coords[::-1]
-                    mcc_values = mcc_values[::-1]
-                
+                mcc_values = mcc_line_values[valid_indices]
+                logger.info(f"MCC dose values for valid points: {mcc_values[:5]}..." if len(mcc_values) > 5 else f"MCC dose values: {mcc_values}")
+                logger.info(f"MCC dose range for valid points: {mcc_values.min():.3f} to {mcc_values.max():.3f}")
+
+                # DEBUG: Compare coordinate ranges
+                if direction == "vertical":
+                    logger.info(f"=== COORDINATE RANGE COMPARISON ===")
+                    logger.info(f"DICOM y-range: {profile_coords_dicom.min():.2f} to {profile_coords_dicom.max():.2f} mm")
+                    logger.info(f"MCC y-range: {mcc_phys_coords.min():.2f} to {mcc_phys_coords.max():.2f} mm")
+                    logger.info(f"Overlap range: {max(profile_coords_dicom.min(), mcc_phys_coords.min()):.2f} to {min(profile_coords_dicom.max(), mcc_phys_coords.max()):.2f} mm")
+
+                    # Check if there's any overlap
+                    overlap_exists = not (mcc_phys_coords.max() < profile_coords_dicom.min() or
+                                        mcc_phys_coords.min() > profile_coords_dicom.max())
+                    logger.info(f"Coordinate ranges overlap: {overlap_exists}")
+
                 # Find corresponding DICOM values at MCC measurement points
                 dicom_at_mcc_positions = np.array([
                     dicom_values[find_nearest_index(profile_coords_dicom, pos)] for pos in mcc_phys_coords
                 ])
-                
+                logger.info(f"DICOM values at MCC positions: {dicom_at_mcc_positions[:5]}..." if len(dicom_at_mcc_positions) > 5 else f"DICOM values at MCC positions: {dicom_at_mcc_positions}")
+
                 # Interpolate MCC data for smooth plotting
                 if len(mcc_values) > 1:
-                    # The coordinate arrays are now guaranteed to be ascending,
-                    # so we can interpolate directly.
+                    logger.info(f"Creating interpolation from {len(mcc_phys_coords)} MCC points to {len(profile_coords_dicom)} DICOM points")
                     mcc_interp = np.interp(
                         profile_coords_dicom,
                         mcc_phys_coords,
                         mcc_values,
                         left=np.nan, right=np.nan
                     )
+                    # Count non-NaN interpolated values
+                    valid_interp_count = np.sum(~np.isnan(mcc_interp))
+                    logger.info(f"Interpolated MCC values: {valid_interp_count}/{len(mcc_interp)} non-NaN values")
+                    if valid_interp_count > 0:
+                        valid_interp_values = mcc_interp[~np.isnan(mcc_interp)]
+                        logger.info(f"Interpolated values range: {valid_interp_values.min():.3f} to {valid_interp_values.max():.3f}")
                     profile_data['mcc_interp'] = mcc_interp
+                else:
+                    logger.warning(f"Cannot interpolate with only {len(mcc_values)} MCC point(s)")
 
                 profile_data['mcc_phys_coords'] = mcc_phys_coords
                 profile_data['mcc_values'] = mcc_values
@@ -165,7 +211,7 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
         full_grid_px = x_pix + handler.crop_pixel_offset[0]
         full_grid_py = y_pix + handler.crop_pixel_offset[1]
         phys_x_all = (full_grid_px - handler.mcc_origin_x) * handler.mcc_spacing_x
-        phys_y_all = (full_grid_py - handler.mcc_origin_y) * handler.mcc_spacing_y
+        phys_y_all = -(full_grid_py - handler.mcc_origin_y) * handler.mcc_spacing_y
         all_mcc_coords_phys = np.vstack((phys_x_all, phys_y_all)).T
 
         all_mcc_dose_values = mcc_dose_data[all_valid_indices]
