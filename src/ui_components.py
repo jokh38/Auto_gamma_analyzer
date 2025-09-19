@@ -75,12 +75,12 @@ class ProfileDataTable(QTableWidget):
                 self.setItem(i, 2, QTableWidgetItem(f"{meas:.1f}"))
 
 
-def draw_image(canvas, image_data, extent, title, colorbar_label=None, 
-               show_origin=True, show_colorbar=True, apply_cropping=False, 
-               crop_bounds=None, line=None):
+def draw_image(canvas, image_data, extent, title, colorbar_label=None,
+               show_origin=True, show_colorbar=True, apply_cropping=False,
+               crop_bounds=None, line=None, data_type='dicom'):
     """
     통합된 이미지 그리기 함수
-    
+
     Args:
         canvas: 그림을 그릴 MatplotlibCanvas 객체
         image_data: 표시할 이미지 데이터 배열
@@ -92,16 +92,27 @@ def draw_image(canvas, image_data, extent, title, colorbar_label=None,
         apply_cropping: 크롭 적용 여부(기본값: False)
         crop_bounds: 도스 경계 정보 딕셔너리(선택 사항)
         line: 프로파일 라인 정보 딕셔너리(선택 사항, 예: {"type": "vertical", "x": value})
+        data_type: 데이터 타입 ('dicom' 또는 'mcc'), 좌표계 설정용
     """
     # 캔버스 초기화
     canvas.fig.clear()
     canvas.axes = canvas.fig.add_subplot(111)
     
-    # 이미지 표시
+    image_to_display = image_data
+    # DICOM, MCC, Gamma 맵 모두 Y축이 위로 향하도록 origin을 'lower'로 통일합니다.
+    origin_to_use = 'lower'
+
+    # 이미지 표시 - 데이터 타입에 따라 적절한 origin 설정
+    # MCC와 Gamma 데이터는 배열의 위쪽(낮은 인덱스)에 물리적 Y좌표가 큰 값이 오므로,
+    # 'lower' origin으로 올바르게 표시하려면 데이터를 상하 반전해야 합니다.
+    if 'MCC' in title or 'Gamma' in title:
+        image_to_display = np.flipud(image_data)
+
     im = canvas.axes.imshow(
-        image_data, 
+        image_to_display,
         cmap='jet',
-        extent=extent
+        extent=extent,
+        origin=origin_to_use
     )
     
     # 컬러바 추가(옵션)

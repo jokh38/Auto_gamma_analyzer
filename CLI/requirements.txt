@@ -1,6 +1,0 @@
-numpy
-matplotlib
-pydicom
-scipy
-pylinac
-pyyaml

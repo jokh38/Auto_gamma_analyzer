@@ -21,6 +21,7 @@ class BaseFileHandler:
         self.origin_x = 0
         self.origin_y = 0
         self.pixel_spacing = 1.0
+        self.crop_pixel_offset = (0, 0)
         
     def get_filename(self):
         """Returns the filename."""
@@ -91,7 +92,64 @@ class DicomFileHandler(BaseFileHandler):
         self.dicom_origin_x = 0
         self.dicom_origin_y = 0
         self.pixel_spacing = 1.0
-        
+        self.dose_bounds = None
+
+    def _calculate_bounds_from_mask(self, mask, margin_mm=0):
+        """Calculates physical bounds from a boolean mask."""
+        if not np.any(mask):
+            return None
+
+        rows, cols = np.where(mask)
+        if len(rows) == 0:
+            return None
+
+        min_row, max_row = rows.min(), rows.max()
+        min_col, max_col = cols.min(), cols.max()
+
+        min_phys_x, min_phys_y = self.pixel_to_physical_coord(min_col, min_row)
+        max_phys_x, max_phys_y = self.pixel_to_physical_coord(max_col, max_row)
+
+        if min_phys_x > max_phys_x:
+            min_phys_x, max_phys_x = max_phys_x, min_phys_x
+        if min_phys_y > max_phys_y:
+            min_phys_y, max_phys_y = max_phys_y, min_phys_y
+
+        if margin_mm > 0:
+            min_phys_x -= margin_mm
+            max_phys_x += margin_mm
+            min_phys_y -= margin_mm
+            max_phys_y += margin_mm
+
+        bounds = {
+            'min_x': min_phys_x, 'max_x': max_phys_x,
+            'min_y': min_phys_y, 'max_y': max_phys_y
+        }
+        logger.info(f"Calculated dose bounds (physical coords, {margin_mm}mm margin included): {bounds}")
+        return bounds
+
+    def calculate_dose_bounds(self, image_data=None, threshold_percent=0, margin_mm=0):
+        """Calculates the bounds for a dose area based on a threshold or non-zero dose."""
+        if image_data is None:
+            image_data = self.get_pixel_data()
+        if image_data is None:
+            return None
+
+        if threshold_percent > 0:
+            valid_data = image_data[image_data >= 0]
+            if valid_data.size == 0:
+                return None
+
+            max_dose = np.max(valid_data)
+            if max_dose > 0:
+                threshold_val = (threshold_percent / 100.0) * max_dose
+                mask = image_data >= threshold_val
+            else:
+                mask = image_data >= 0
+        else:
+            mask = image_data > 0
+
+        return self._calculate_bounds_from_mask(mask, margin_mm)
+
     def open_file(self, filename):
         """
         Loads and processes a DICOM RT dose file.
@@ -134,7 +192,8 @@ class DicomFileHandler(BaseFileHandler):
                 logger.warning(f"DICOM origin info not found. Defaulting to image center: ({self.dicom_origin_x}, {self.dicom_origin_y})")
                 
             self.create_physical_coordinates_dcm()
-
+            # Calculate dose bounds (auto-crop ROI to area with >1% of max dose + 20mm margin)
+            self.dose_bounds = self.calculate_dose_bounds(threshold_percent=1, margin_mm=20)
             return True
 
         except Exception as e:
@@ -146,13 +205,13 @@ class DicomFileHandler(BaseFileHandler):
     def physical_to_pixel_coord(self, phys_x, phys_y):
         """Converts physical coordinates (mm) to pixel coordinates."""
         pixel_x = int(round(phys_x / self.pixel_spacing - self.dicom_origin_x))
-        pixel_y = int(round(-phys_y / self.pixel_spacing - self.dicom_origin_y))
+        pixel_y = int(round(phys_y / self.pixel_spacing - self.dicom_origin_y))
         return pixel_x, pixel_y
 
     def pixel_to_physical_coord(self, pixel_x, pixel_y):
         """Converts pixel coordinates to physical coordinates (mm)."""
         phys_x = (pixel_x + self.dicom_origin_x) * self.pixel_spacing
-        phys_y = -(pixel_y + self.dicom_origin_y) * self.pixel_spacing
+        phys_y = (pixel_y + self.dicom_origin_y) * self.pixel_spacing
         return phys_x, phys_y
 
     def get_origin_coords(self):
@@ -179,9 +238,8 @@ class DicomFileHandler(BaseFileHandler):
         if self.pixel_data is None: return
         height, width = self.pixel_data.shape
         phys_x = (np.arange(width) + self.dicom_origin_x) * self.pixel_spacing
-        phys_y = (np.arange(height) + self.dicom_origin_y) * -self.pixel_spacing
+        phys_y = (np.arange(height) + self.dicom_origin_y) * self.pixel_spacing
         self.phys_x_mesh, self.phys_y_mesh = np.meshgrid(phys_x, phys_y)
-        # physical_extent의 y축 순서를 min, max로 표준화합니다.
         self.physical_extent = [phys_x.min(), phys_x.max(), phys_y.min(), phys_y.max()]
 
 

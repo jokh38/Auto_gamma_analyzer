@@ -5,7 +5,9 @@
       "Bash(python:*)",
       "Bash(pip3 install:*)",
       "Bash(cp:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Read(//tmp/**)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }

@@ -1,5 +1,6 @@
 import sys
 import os
+from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
@@ -8,12 +9,12 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                              QSpinBox, QComboBox, QGridLayout, 
                              QScrollArea, QGroupBox, QMessageBox)
-from datetime import datetime
 
 from utils import logger
 from file_handlers import DicomFileHandler, MCCFileHandler
 from ui_components import MatplotlibCanvas, ProfileDataTable, draw_image
 from analysis import extract_profile_data, perform_gamma_analysis
+from reporting import generate_report
 
 class GammaAnalysisApp(QMainWindow):
     """2D 감마 분석 애플리케이션"""
@@ -28,6 +29,16 @@ class GammaAnalysisApp(QMainWindow):
         self.current_profile_data = None
         self.profile_direction = "vertical"  # 기본값: 수직
         self.dose_bounds = None # 크롭 경계
+        
+        # 분석 결과 저장을 위한 변수
+        self.gamma_map = None
+        self.gamma_stats = None
+        self.phys_extent = None
+        self.mcc_interp_data = None
+        self.dd_map = None
+        self.dta_map = None
+        self.dd_stats = None
+        self.dta_stats = None
         
         # UI 설정
         self.init_ui()
@@ -136,6 +147,9 @@ class GammaAnalysisApp(QMainWindow):
         control_layout.addWidget(profile_dir_group, 0, 4)
         control_layout.addWidget(gamma_group, 0, 5)
         control_layout.addWidget(run_report_group, 0, 6)
+        
+        # 초기에는 리포트 버튼 비활성화
+        self.generate_report_btn.setEnabled(False)
         
         # 메인 레이아웃에 컨트롤 패널 추가
         main_layout.addWidget(control_panel)
@@ -502,107 +516,110 @@ class GammaAnalysisApp(QMainWindow):
             dose_percent_threshold = self.dd_spin.value()
             global_normalisation = self.gamma_type_combo.currentText() == "Global"
             
-            gamma_map, gamma_stats, phys_extent = perform_gamma_analysis(
+            # 분석 함수에서 모든 결과 수신
+            (
+                self.gamma_map, self.gamma_stats, self.phys_extent,
+                self.mcc_interp_data, self.dd_map, self.dta_map,
+                self.dd_stats, self.dta_stats
+            ) = perform_gamma_analysis(
                 self.mcc_handler, self.dicom_handler,
                 dose_percent_threshold, distance_mm_threshold, global_normalisation
             )
             
-            if 'pass_rate' in gamma_stats:
+            if 'pass_rate' in self.gamma_stats:
                 draw_image(
                     canvas=self.gamma_canvas,
-                    image_data=gamma_map,
-                    extent=phys_extent,
-                    title=f'Gamma Analysis: Pass Rate = {gamma_stats["pass_rate"]:.2f}%',
+                    image_data=self.gamma_map,
+                    extent=self.phys_extent,
+                    title=f'Gamma Analysis: Pass Rate = {self.gamma_stats["pass_rate"]:.2f}%',
                     colorbar_label='Gamma Index',
                     show_origin=True,
                     show_colorbar=True,
                     apply_cropping=True, # 감마 맵 크롭
                     crop_bounds=self.dose_bounds
                 )
-                
-                stats_text = (f"감마 통계: 통과율 = {gamma_stats['pass_rate']:.2f}% | "
-                            f"평균 = {gamma_stats['mean']:.3f} | 최소 = {gamma_stats['min']:.3f} | "
-                            f"최대 = {gamma_stats['max']:.3f}")
+                stats_text = (f"감마 통계: 통과율 = {self.gamma_stats['pass_rate']:.2f}% | "
+                            f"평균 = {self.gamma_stats['mean']:.3f} | 최소 = {self.gamma_stats['min']:.3f} | "
+                            f"최대 = {self.gamma_stats['max']:.3f}")
                 self.gamma_stats_label.setText(stats_text)
                 logger.info(f"감마 분석 완료: {stats_text}")
+                
+                # 분석 성공 시 리포트 버튼 활성화
+                self.generate_report_btn.setEnabled(True)
             else:
                 QMessageBox.warning(self, "Warning", "유효한 감마 분석 결과가 없습니다.")
+                self.generate_report_btn.setEnabled(False)
                 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"감마 분석 오류: {str(e)}")
             logger.error(f"감마 분석 오류: {str(e)}", exc_info=True)
+            self.generate_report_btn.setEnabled(False)
 
     def generate_report(self):
-        """분석 결과가 포함된 보고서 생성"""
-        if self.dicom_handler.get_pixel_data() is None or self.mcc_handler.get_matrix_data() is None:
-            QMessageBox.warning(self, "Warning", "두 데이터(DICOM과 MCC) 모두 로드해야 함")
+        """분석 결과가 포함된 종합 보고서 생성"""
+        if self.gamma_stats is None:
+            QMessageBox.warning(self, "Warning", "먼저 감마 분석을 실행해야 합니다.")
             return
-            
+
         try:
-            options = QFileDialog.Options()
-            filename, _ = QFileDialog.getSaveFileName(
-                self, "Save Report", "./report.pdf", 
-                "PDF Files (*.pdf);;All Files (*)", options=options)
-                
-            if not filename:
+            # 보고서 저장 디렉토리 설정 (run.py 위치 기준)
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            report_dir = os.path.join(base_dir, 'Report')
+
+            # 'Report' 폴더가 없으면 생성
+            if not os.path.exists(report_dir):
+                os.makedirs(report_dir)
+                logger.info(f"Report directory created: {report_dir}")
+
+            # 기본 파일 이름 설정
+            _, patient_id, _ = self.dicom_handler.get_patient_info()
+            dicom_filename_base = os.path.splitext(self.dicom_handler.get_filename())[0]
+            default_filename = f"report_{patient_id}_{dicom_filename_base}.jpg"
+            default_path = os.path.join(report_dir, default_filename)
+            
+            output_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Report", default_path,
+                "JPEG Image (*.jpg *.jpeg);;PDF Document (*.pdf)"
+            )
+
+            if not output_path:
                 return
-                
-            report_fig = plt.figure(figsize=(11.7, 8.3))
-            gs = report_fig.add_gridspec(3, 2)
-            report_fig.suptitle(f"2D Gamma Analysis Report\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", fontsize=16)
-            
-            # DICOM 이미지
-            ax1 = report_fig.add_subplot(gs[0, 0])
-            ax1.imshow(self.dicom_handler.get_pixel_data(), cmap='jet', extent=self.dicom_handler.get_physical_extent())
-            if self.dose_bounds:
-                ax1.set_xlim(self.dose_bounds['min_x'], self.dose_bounds['max_x'])
-                ax1.set_ylim(self.dose_bounds['min_y'], self.dose_bounds['max_y'])
-            ax1.set_title(f'DICOM RT Dose: {self.dicom_handler.get_filename()}')
-            
-            # MCC 이미지
-            ax2 = report_fig.add_subplot(gs[0, 1])
-            ax2.imshow(self.mcc_handler.get_interpolated_matrix_data(), cmap='jet', extent=self.mcc_handler.get_physical_extent())
-            if self.dose_bounds:
-                ax2.set_xlim(self.dose_bounds['min_x'], self.dose_bounds['max_x'])
-                ax2.set_ylim(self.dose_bounds['min_y'], self.dose_bounds['max_y'])
-            ax2.set_title(f'MCC Data: {self.mcc_handler.get_filename()}')
-            
-            # 프로파일
-            if self.current_profile_data is not None:
-                ax3 = report_fig.add_subplot(gs[1, :])
-                ax3.plot(self.current_profile_data['phys_coords'], self.current_profile_data['dicom_values'], 'b-', label='DICOM')
-                if 'mcc_interp' in self.current_profile_data:
-                    ax3.plot(self.current_profile_data['phys_coords'], self.current_profile_data['mcc_interp'], 'r-', label='MCC (interpolated)')
-                ax3.set_xlabel('Position (mm)')
-                ax3.set_ylabel('Dose')
-                ax3.set_title('Dose Profile')
-                ax3.legend()
-                ax3.grid(True)
-            
-            # 감마 분석
-            if hasattr(self, 'gamma_stats_label') and '통과율' in self.gamma_stats_label.text():
-                ax4 = report_fig.add_subplot(gs[2, :])
-                gamma_image = self.gamma_canvas.axes.images[0]
-                im = ax4.imshow(gamma_image.get_array(), cmap=gamma_image.get_cmap(), norm=gamma_image.get_norm(), extent=self.mcc_handler.get_physical_extent())
-                if self.dose_bounds:
-                    ax4.set_xlim(self.dose_bounds['min_x'], self.dose_bounds['max_x'])
-                    ax4.set_ylim(self.dose_bounds['min_y'], self.dose_bounds['max_y'])
-                plt.colorbar(im, ax=ax4, label='Gamma Index')
-                stats_text = self.gamma_stats_label.text().replace('감마 통계: ', '')
-                ax4.set_title(f'Gamma Analysis: {stats_text}')
-                param_text = (f"Parameters: DTA = {self.dta_spin.value()} mm, DD = {self.dd_spin.value()}%, Type = {self.gamma_type_combo.currentText()}")
-                ax4.text(0.5, -0.15, param_text, transform=ax4.transAxes, ha='center', fontsize=10)
-            
-            plt.tight_layout(rect=[0, 0, 1, 0.95])
-            plt.savefig(filename)
-            plt.close(report_fig)
-            
-            logger.info(f"보고서 저장 완료: {filename}")
-            QMessageBox.information(self, "Success", f"보고서 저장 완료: {filename}")
-                
+
+            logger.info(f"Generating comprehensive report at: {output_path}")
+
+            # 보고서용 중심 프로파일 데이터 추출
+            ver_profile_data = extract_profile_data("vertical", 0, self.dicom_handler, self.mcc_handler)
+            hor_profile_data = extract_profile_data("horizontal", 0, self.dicom_handler, self.mcc_handler)
+
+            # UI에서 분석 매개변수 가져오기
+            dta = self.dta_spin.value()
+            dd = self.dd_spin.value()
+            suppression_level = 10  # 분석에 사용된 임계값 (현재는 하드코딩)
+
+            # 보고서 생성 함수 호출
+            generate_report(
+                output_path=output_path,
+                dicom_handler=self.dicom_handler,
+                mcc_handler=self.mcc_handler,
+                gamma_map=self.gamma_map,
+                gamma_stats=self.gamma_stats,
+                dta=dta,
+                dd=dd,
+                suppression_level=suppression_level,
+                ver_profile_data=ver_profile_data,
+                hor_profile_data=hor_profile_data,
+                mcc_interp_data=self.mcc_interp_data,
+                dd_stats=self.dd_stats,
+                dta_stats=self.dta_stats,
+                dose_bounds=self.dose_bounds
+            )
+
+            logger.info(f"Report successfully saved to {output_path}")
+            QMessageBox.information(self, "Success", f"Report saved successfully to:\n{output_path}")
+
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"보고서 생성 오류: {str(e)}")
-            logger.error(f"보고서 생성 오류: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to generate report: {str(e)}")
+            logger.error(f"Failed to generate report: {str(e)}", exc_info=True)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

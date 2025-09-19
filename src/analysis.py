@@ -5,7 +5,7 @@ including profile extraction and gamma analysis.
 """
 import numpy as np
 from scipy.interpolate import griddata
-from src.utils import logger, find_nearest_index
+from utils import logger, find_nearest_index, save_map_to_csv
 import os
 
 def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=None):
@@ -35,6 +35,7 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
             fixed_axis_coords_dicom = dicom_handler.phys_x_mesh[0, :]
             profile_axis_mesh_dicom = dicom_handler.phys_y_mesh
             slicer_dicom = lambda idx: (slice(None), idx)
+            sort_required = True  # y-axis is inverted and needs sorting for interpolation
             if mcc_handler:
                 mcc_fixed_axis_coords = mcc_handler.phys_x_mesh[0, :]
                 mcc_profile_axis_mesh = mcc_handler.phys_y_mesh
@@ -44,6 +45,7 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
             fixed_axis_coords_dicom = dicom_handler.phys_y_mesh[:, 0]
             profile_axis_mesh_dicom = dicom_handler.phys_x_mesh
             slicer_dicom = lambda idx: (idx, slice(None))
+            sort_required = False # x-axis is already sorted
             if mcc_handler:
                 mcc_fixed_axis_coords = mcc_handler.phys_y_mesh[:, 0]
                 mcc_profile_axis_mesh = mcc_handler.phys_x_mesh
@@ -56,18 +58,12 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
         profile_coords_dicom = profile_axis_mesh_dicom[slicer_dicom(closest_idx_dicom)]
         dicom_values = dicom_image[slicer_dicom(closest_idx_dicom)]
 
-        # DEBUG LOGGING for DICOM data
-        if direction == "vertical":
-            logger.info(f"=== DICOM VERTICAL PROFILE DEBUG ===")
-            logger.info(f"DICOM fixed axis coords shape: {fixed_axis_coords_dicom.shape}")
-            logger.info(f"DICOM fixed axis coords range: {fixed_axis_coords_dicom.min():.2f} to {fixed_axis_coords_dicom.max():.2f} mm")
-            logger.info(f"Closest DICOM index for x={fixed_position}: {closest_idx_dicom}")
-            logger.info(f"Actual DICOM x-coord at index {closest_idx_dicom}: {fixed_axis_coords_dicom[closest_idx_dicom]:.2f} mm")
-            logger.info(f"DICOM profile axis mesh shape: {profile_axis_mesh_dicom.shape}")
-            logger.info(f"DICOM profile coords shape: {profile_coords_dicom.shape}")
-            logger.info(f"DICOM y-coords range: {profile_coords_dicom.min():.2f} to {profile_coords_dicom.max():.2f} mm")
-            logger.info(f"DICOM values shape: {dicom_values.shape}")
-            logger.info(f"DICOM dose range: {dicom_values.min():.3f} to {dicom_values.max():.3f}")
+        # For vertical profiles, the physical y-coordinate is descending.
+        # To ensure consistency for interpolation and plotting, we make it ascending.
+        if sort_required:
+            # Reverse both arrays to sort them in ascending order of coordinates.
+            profile_coords_dicom = profile_coords_dicom[::-1]
+            dicom_values = dicom_values[::-1]
 
         profile_data['phys_coords'] = profile_coords_dicom
         profile_data['dicom_values'] = dicom_values
@@ -75,111 +71,47 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
         # 2. Process MCC data if available
         if mcc_handler and mcc_handler.get_matrix_data() is not None:
             mcc_image = mcc_handler.get_matrix_data()
-
+            
             closest_idx_mcc = find_nearest_index(mcc_fixed_axis_coords, fixed_position)
             mcc_line_values = mcc_image[slicer_mcc(closest_idx_mcc)]
-
-            # DEBUG LOGGING for vertical profile
-            if direction == "vertical":
-                logger.info(f"=== VERTICAL PROFILE DEBUG ===")
-                logger.info(f"Fixed position (x): {fixed_position} mm")
-                logger.info(f"MCC fixed axis coords shape: {mcc_fixed_axis_coords.shape}")
-                logger.info(f"MCC fixed axis coords range: {mcc_fixed_axis_coords.min():.2f} to {mcc_fixed_axis_coords.max():.2f} mm")
-                logger.info(f"Closest MCC index for x={fixed_position}: {closest_idx_mcc}")
-                logger.info(f"Actual MCC x-coord at index {closest_idx_mcc}: {mcc_fixed_axis_coords[closest_idx_mcc]:.2f} mm")
-                logger.info(f"MCC image shape: {mcc_image.shape}")
-                logger.info(f"MCC line values shape (column {closest_idx_mcc}): {mcc_line_values.shape}")
-                logger.info(f"MCC line values range: {mcc_line_values.min():.3f} to {mcc_line_values.max():.3f}")
-                logger.info(f"MCC line non-zero count: {np.sum(mcc_line_values > 0)}")
-                logger.info(f"MCC profile axis mesh shape: {mcc_profile_axis_mesh.shape}")
-                logger.info(f"MCC y-coords range: {mcc_profile_axis_mesh.min():.2f} to {mcc_profile_axis_mesh.max():.2f} mm")
-
-            # Use > 0 instead of >= 0 to show only non-zero measurement values
+            
             valid_indices = np.where(mcc_line_values > 0)[0]
-
-            logger.info(f"Valid MCC indices found: {len(valid_indices)} points")
-            if len(valid_indices) > 0:
-                logger.info(f"Valid indices: {valid_indices[:10]}..." if len(valid_indices) > 10 else f"Valid indices: {valid_indices}")
-
+            
             if len(valid_indices) > 0:
                 # Get physical coordinates and dose values for valid MCC points
                 if direction == "vertical":
-                    # For vertical profile: fixed x (column), varying y (rows)
-                    # valid_indices are row indices, closest_idx_mcc is column index
                     mcc_phys_coords = mcc_profile_axis_mesh[valid_indices, closest_idx_mcc]
-                    logger.info(f"MCC y-coordinates for valid points: {mcc_phys_coords[:5]}..." if len(mcc_phys_coords) > 5 else f"MCC y-coordinates: {mcc_phys_coords}")
-                    logger.info(f"MCC y-coords range for valid points: {mcc_phys_coords.min():.2f} to {mcc_phys_coords.max():.2f} mm")
                 else: # horizontal
-                    # For horizontal profile: fixed y (row), varying x (columns)
-                    # valid_indices are column indices, closest_idx_mcc is row index
                     mcc_phys_coords = mcc_profile_axis_mesh[closest_idx_mcc, valid_indices]
-
+                
                 mcc_values = mcc_line_values[valid_indices]
-                logger.info(f"MCC dose values for valid points: {mcc_values[:5]}..." if len(mcc_values) > 5 else f"MCC dose values: {mcc_values}")
-                logger.info(f"MCC dose range for valid points: {mcc_values.min():.3f} to {mcc_values.max():.3f}")
 
-                # DEBUG: Compare coordinate ranges
-                if direction == "vertical":
-                    logger.info(f"=== COORDINATE RANGE COMPARISON ===")
-                    logger.info(f"DICOM y-range: {profile_coords_dicom.min():.2f} to {profile_coords_dicom.max():.2f} mm")
-                    logger.info(f"MCC y-range: {mcc_phys_coords.min():.2f} to {mcc_phys_coords.max():.2f} mm")
-                    logger.info(f"Overlap range: {max(profile_coords_dicom.min(), mcc_phys_coords.min()):.2f} to {min(profile_coords_dicom.max(), mcc_phys_coords.max()):.2f} mm")
-
-                    # Check if there's any overlap
-                    overlap_exists = not (mcc_phys_coords.max() < profile_coords_dicom.min() or
-                                        mcc_phys_coords.min() > profile_coords_dicom.max())
-                    logger.info(f"Coordinate ranges overlap: {overlap_exists}")
-
+                # Explicitly sort MCC coordinates and values to be monotonically increasing,
+                # which is a requirement for np.interp.
+                sort_indices = np.argsort(mcc_phys_coords)
+                mcc_phys_coords = mcc_phys_coords[sort_indices]
+                mcc_values = mcc_values[sort_indices]
+                
                 # Find corresponding DICOM values at MCC measurement points
                 dicom_at_mcc_positions = np.array([
                     dicom_values[find_nearest_index(profile_coords_dicom, pos)] for pos in mcc_phys_coords
                 ])
-                logger.info(f"DICOM values at MCC positions: {dicom_at_mcc_positions[:5]}..." if len(dicom_at_mcc_positions) > 5 else f"DICOM values at MCC positions: {dicom_at_mcc_positions}")
-
+                
                 # Interpolate MCC data for smooth plotting
                 if len(mcc_values) > 1:
-                    logger.info(f"Creating interpolation from {len(mcc_phys_coords)} MCC points to {len(profile_coords_dicom)} DICOM points")
-                    logger.info(f"MCC coords sorted? {np.all(mcc_phys_coords[:-1] <= mcc_phys_coords[1:])}")
-                    logger.info(f"First few MCC coords: {mcc_phys_coords[:3]}")
-                    logger.info(f"Last few MCC coords: {mcc_phys_coords[-3:]}")
-                    logger.info(f"First few DICOM coords: {profile_coords_dicom[:3]}")
-                    logger.info(f"Last few DICOM coords: {profile_coords_dicom[-3:]}")
-
-                    # Sort MCC coordinates and values for proper interpolation
-                    sorted_indices = np.argsort(mcc_phys_coords)
-                    mcc_phys_coords_sorted = mcc_phys_coords[sorted_indices]
-                    mcc_values_sorted = mcc_values[sorted_indices]
-
-                    logger.info(f"After sorting - MCC coords: first={mcc_phys_coords_sorted[:3]}, last={mcc_phys_coords_sorted[-3:]}")
-
+                    # The coordinate arrays are now guaranteed to be ascending,
+                    # so we can interpolate directly.
                     mcc_interp = np.interp(
                         profile_coords_dicom,
-                        mcc_phys_coords_sorted,
-                        mcc_values_sorted,
+                        mcc_phys_coords,
+                        mcc_values,
                         left=np.nan, right=np.nan
                     )
-                    # Count non-NaN interpolated values
-                    valid_interp_count = np.sum(~np.isnan(mcc_interp))
-                    logger.info(f"Interpolated MCC values: {valid_interp_count}/{len(mcc_interp)} non-NaN values")
-                    if valid_interp_count > 0:
-                        valid_interp_values = mcc_interp[~np.isnan(mcc_interp)]
-                        logger.info(f"Interpolated values range: {valid_interp_values.min():.3f} to {valid_interp_values.max():.3f}")
-                    else:
-                        logger.warning(f"No valid interpolated values! Check coordinate overlap and sorting.")
                     profile_data['mcc_interp'] = mcc_interp
-                else:
-                    logger.warning(f"Cannot interpolate with only {len(mcc_values)} MCC point(s)")
 
-                # Store sorted coordinates for plotting
-                if len(mcc_values) > 1:
-                    sorted_indices = np.argsort(mcc_phys_coords)
-                    profile_data['mcc_phys_coords'] = mcc_phys_coords[sorted_indices]
-                    profile_data['mcc_values'] = mcc_values[sorted_indices]
-                    profile_data['dicom_at_mcc'] = dicom_at_mcc_positions[sorted_indices]
-                else:
-                    profile_data['mcc_phys_coords'] = mcc_phys_coords
-                    profile_data['mcc_values'] = mcc_values
-                    profile_data['dicom_at_mcc'] = dicom_at_mcc_positions
+                profile_data['mcc_phys_coords'] = mcc_phys_coords
+                profile_data['mcc_values'] = mcc_values
+                profile_data['dicom_at_mcc'] = dicom_at_mcc_positions
 
         return profile_data
         
@@ -189,7 +121,8 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
 
 def perform_gamma_analysis(reference_handler, evaluation_handler,
                            dose_percent_threshold, distance_mm_threshold,
-                           global_normalisation=True):
+                           global_normalisation=True, threshold=10, max_gamma=None,
+                           save_csv=False, csv_dir=None):
     """
     Performs gamma index analysis directly between sparse reference points (MCC)
     and a dense evaluation grid (DICOM) without interpolation.
@@ -200,12 +133,20 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
         dose_percent_threshold (float): Dose difference criterion (%).
         distance_mm_threshold (float): Distance-to-agreement criterion (mm).
         global_normalisation (bool): Whether to use global normalization.
+        threshold (int): The lower dose threshold for including points in the analysis (%).
+        save_csv (bool): Whether to save the analysis maps to CSV files.
+        csv_dir (str): The directory to save the CSV files in.
 
     Returns:
         tuple: A tuple containing:
             - gamma_map (np.ndarray): The gamma map.
             - gamma_stats (dict): Statistics of the gamma analysis.
             - phys_extent (list): The physical extent of the analysis.
+            - mcc_interp_data (np.ndarray): Interpolated MCC data for visualization.
+            - dd_map (np.ndarray): The dose difference map.
+            - dta_map (np.ndarray): The distance-to-agreement map.
+            - dd_stats (dict): Statistics of the dose difference analysis.
+            - dta_stats (dict): Statistics of the distance-to-agreement analysis.
     """
     try:
         # --- Step 1: Extract and filter reference data (MCC) ---
@@ -221,8 +162,10 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
         # Vectorized calculation of physical coordinates from pixel coordinates
         y_pix, x_pix = all_valid_indices
         handler = reference_handler
-        phys_x_all = (x_pix - handler.mcc_origin_x) * handler.mcc_spacing_x
-        phys_y_all = -(y_pix - handler.mcc_origin_y) * handler.mcc_spacing_y
+        full_grid_px = x_pix + handler.crop_pixel_offset[0]
+        full_grid_py = y_pix + handler.crop_pixel_offset[1]
+        phys_x_all = (full_grid_px - handler.mcc_origin_x) * handler.mcc_spacing_x
+        phys_y_all = -(full_grid_py - handler.mcc_origin_y) * handler.mcc_spacing_y
         all_mcc_coords_phys = np.vstack((phys_x_all, phys_y_all)).T
 
         all_mcc_dose_values = mcc_dose_data[all_valid_indices]
@@ -232,12 +175,12 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
             norm_dose = np.max(all_mcc_dose_values)
         else:
             norm_dose = 1.0  # Local normalization handled per point
-
+        
         if norm_dose == 0:
             raise ValueError("Cannot determine normalization dose (max reference dose is zero).")
 
-        # Filter points based on a simple 10% threshold
-        threshold_dose = 0.1 * norm_dose
+        # Filter points based on the lower dose cutoff threshold
+        threshold_dose = (threshold / 100.0) * norm_dose
         analysis_mask = all_mcc_dose_values >= threshold_dose
 
         # --- Step 2: Extract evaluation data (DICOM) ---
@@ -252,10 +195,21 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
 
         # If no points are left after filtering, return early.
         if not np.any(analysis_mask):
-            logger.warning(f"No MCC data points above the 10% dose threshold ({threshold_dose:.2f} Gy). Gamma analysis will be skipped.")
+            logger.warning(f"No MCC data points above the {threshold}% dose threshold ({threshold_dose:.2f} Gy). Gamma analysis will be skipped.")
             gamma_stats = {'pass_rate': 100, 'mean': 0, 'max': 0, 'min': 0, 'total_points': 0}
             gamma_map_for_display = np.full_like(mcc_dose_data, np.nan)
-            return gamma_map_for_display, gamma_stats, phys_extent
+            # Still create interpolated data for the report
+            mcc_interp_data = griddata(
+                all_mcc_coords_phys, all_mcc_dose_values,
+                (dicom_phys_x_mesh, dicom_phys_y_mesh),
+                method='linear', fill_value=0
+            )
+            # Return empty dd and dta maps when no analysis is performed
+            dd_map_empty = np.full_like(mcc_dose_data, np.nan)
+            dta_map_empty = np.full_like(mcc_dose_data, np.nan)
+            dd_stats_empty = {'mean': 0, 'max': 0, 'min': 0, 'std': 0, 'total_points': 0}
+            dta_stats_empty = {'mean': 0, 'max': 0, 'min': 0, 'std': 0, 'total_points': 0}
+            return gamma_map_for_display, gamma_stats, phys_extent, mcc_interp_data, dd_map_empty, dta_map_empty, dd_stats_empty, dta_stats_empty
 
         # These are the points that will be used in the gamma calculation
         mcc_dose_for_gamma = all_mcc_dose_values[analysis_mask]
@@ -269,8 +223,10 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
         # Setup criteria
         dta_criteria_sq = distance_mm_threshold ** 2
 
-        # Initialize gamma values array
+        # Initialize gamma, dd, and dta values arrays
         gamma_values = np.full(len(points_ref), np.inf)
+        dd_values = np.full(len(points_ref), np.inf)
+        dta_values = np.full(len(points_ref), np.inf)
 
         logger.info(f"Starting manual gamma calculation for {len(points_ref)} reference points...")
 
@@ -310,18 +266,27 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
             # 4. 감마 계산
             gamma_sq = (dist_sq / dta_criteria_sq) + (dose_diff_sq / dd_criteria_sq)
 
-            # 5. 최소 감마 값 저장
+            # 5. 최소 감마 값 및 해당 지점의 dd, dta 저장
             min_idx = np.argmin(gamma_sq)
             min_gamma = np.sqrt(gamma_sq[min_idx])
             gamma_values[i] = min_gamma
+            
+            # Store dd and dta values at the minimum gamma point
+            dd_values[i] = np.sqrt(dose_diff_sq[min_idx]) / (dose_percent_threshold / 100.0 * (norm_dose if global_normalisation else dose_ref))
+            dta_values[i] = np.sqrt(dist_sq[min_idx]) / distance_mm_threshold
 
             # Progress logging for large datasets
             if (i + 1) % 100 == 0:
                 logger.info(f"Processed {i + 1}/{len(points_ref)} reference points...")
 
-        # --- Step 4: Create gamma map and calculate statistics ---
+        # --- Step 4: Create gamma, dd, and dta maps and calculate statistics ---
         gamma_map_for_display = np.full_like(mcc_dose_data, np.nan)
+        dd_map_for_display = np.full_like(mcc_dose_data, np.nan)
+        dta_map_for_display = np.full_like(mcc_dose_data, np.nan)
+
         gamma_map_for_display[original_indices_for_gamma] = gamma_values
+        dd_map_for_display[original_indices_for_gamma] = dd_values
+        dta_map_for_display[original_indices_for_gamma] = dta_values
 
         gamma_stats = {}
         valid_gamma = gamma_values[~np.isinf(gamma_values) & ~np.isnan(gamma_values)]
@@ -336,9 +301,60 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
         else:
             gamma_stats.update({'pass_rate': 0, 'mean': 0, 'max': 0, 'min': 0, 'total_points': 0})
 
+        # Calculate DD and DTA statistics
+        dd_stats = {}
+        dta_stats = {}
+
+        valid_dd = dd_values[~np.isinf(dd_values) & ~np.isnan(dd_values)]
+        valid_dta = dta_values[~np.isinf(dta_values) & ~np.isnan(dta_values)]
+        
+        if len(valid_dd) > 0:
+            dd_stats['mean'] = np.mean(valid_dd)
+            dd_stats['max'] = np.max(valid_dd)
+            dd_stats['min'] = np.min(valid_dd)
+            dd_stats['std'] = np.std(valid_dd)
+            dd_stats['total_points'] = len(valid_dd)
+        else:
+            dd_stats.update({'mean': 0, 'max': 0, 'min': 0, 'std': 0, 'total_points': 0})
+            
+        if len(valid_dta) > 0:
+            dta_stats['mean'] = np.mean(valid_dta)
+            dta_stats['max'] = np.max(valid_dta)
+            dta_stats['min'] = np.min(valid_dta)
+            dta_stats['std'] = np.std(valid_dta)
+            dta_stats['total_points'] = len(valid_dta)
+        else:
+            dta_stats.update({'mean': 0, 'max': 0, 'min': 0, 'std': 0, 'total_points': 0})
+
         logger.info(f"Manual gamma analysis complete: {gamma_stats.get('total_points', 0)} points analyzed, pass rate {gamma_stats.get('pass_rate', 0):.1f}%")
 
-        return gamma_map_for_display, gamma_stats, phys_extent
+        # --- Step 5: Create interpolated MCC data for visualization purposes only ---
+        mcc_interp_data = griddata(
+            all_mcc_coords_phys,
+            all_mcc_dose_values,
+            (dicom_phys_x_mesh, dicom_phys_y_mesh),
+            method='linear',
+            fill_value=0
+        )
+
+        # --- Step 6: Save maps to CSV ---
+        if save_csv and csv_dir:
+            try:
+                base_filename = os.path.splitext(os.path.basename(reference_handler.filename))[0]
+                mcc_phys_x_mesh = reference_handler.phys_x_mesh
+                mcc_phys_y_mesh = reference_handler.phys_y_mesh
+
+                if gamma_stats.get('total_points', 0) > 0:
+                    gamma_path = os.path.join(csv_dir, f"{base_filename}_gamma.csv")
+                    dd_path = os.path.join(csv_dir, f"{base_filename}_dd.csv")
+                    dta_path = os.path.join(csv_dir, f"{base_filename}_dta.csv")
+                    save_map_to_csv(gamma_map_for_display, mcc_phys_x_mesh, mcc_phys_y_mesh, gamma_path)
+                    save_map_to_csv(dd_map_for_display, mcc_phys_x_mesh, mcc_phys_y_mesh, dd_path)
+                    save_map_to_csv(dta_map_for_display, mcc_phys_x_mesh, mcc_phys_y_mesh, dta_path)
+            except Exception as e:
+                logger.error(f"Failed to save analysis maps to CSV: {e}", exc_info=True)
+
+        return gamma_map_for_display, gamma_stats, phys_extent, mcc_interp_data, dd_map_for_display, dta_map_for_display, dd_stats, dta_stats
 
     except Exception as e:
         logger.error(f"Error during manual gamma analysis: {str(e)}")
