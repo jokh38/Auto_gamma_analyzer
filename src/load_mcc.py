@@ -1,107 +1,15 @@
 """
-This module provides standardized loader functions for various dose file formats.
-Each loader is responsible for handling the specifics of its file type and
-returning a consistent `StandardDoseData` object.
+This module provides the standardized loader function for MCC dose file formats.
+It handles the specifics of parsing MCC files and returns a consistent
+`StandardDoseData` object.
 """
 import numpy as np
-import pydicom
 from scipy.interpolate import griddata
 
 from .standard_data_model import StandardDoseData
 from .utils import logger
 
-
-def load_dcm(filename: str) -> StandardDoseData:
-    """
-    Reads a DICOM RT Dose file and converts it into a standard data object.
-
-    This function handles the coordinate system transformation required for DICOM files,
-    where the Y-axis is typically inverted. The data grid is flipped, and the
-    Y-coordinates are made monotonically increasing to match the standard.
-
-    Args:
-        filename (str): The path to the DICOM file.
-
-    Returns:
-        StandardDoseData: A standardized data object containing the dose grid,
-                          coordinates, and metadata.
-    """
-    logger.info(f"Loading DICOM file: {filename}")
-    try:
-        dcm = pydicom.dcmread(filename)
-
-        if dcm.Modality != 'RTDOSE':
-            raise ValueError("File is not a DICOM RT Dose file.")
-
-        pixel_data = dcm.pixel_array * dcm.DoseGridScaling
-        height, width = pixel_data.shape
-
-        # Extract spacing and origin information
-        spacing_x, spacing_y = dcm.PixelSpacing
-        pos_x, _, pos_y = dcm.ImagePositionPatient  # DICOM Y is at index 2
-
-        # 1. Create standardized physical coordinates
-        # X-coordinates are straightforward (left to right)
-        x_coords = (np.arange(width) * spacing_x) + pos_x
-
-        # Y-coordinates need to be transformed to be monotonically increasing (bottom to top)
-        # The DICOM standard's ImagePositionPatient refers to the top-left corner.
-        # The pixel data is ordered from top to bottom.
-        y_coords = (np.arange(height) * spacing_y) + pos_y
-
-        # 2. Flip the data grid to match the ascending Y-coordinates
-        # np.flipud flips the array in the up/down direction.
-        data_grid = np.flipud(pixel_data)
-        # After flipping, the first row of data_grid corresponds to the first y_coord.
-        # But the y_coords need to be sorted to be ascending.
-        y_coords = np.sort(y_coords)
-
-        # We need to ensure the y-coordinates match the flipped grid.
-        # The original pixel_data[0] corresponds to pos_y. After flipud, this data is at the bottom.
-        # So the lowest y_coord should be pos_y.
-        # Let's re-calculate y_coords to be explicitly ascending from the start.
-        # The physical location of rows are: pos_y, pos_y+spacing, ...
-        # The data array `pixel_data` has pixel_data[0] corresponding to physical y `pos_y`.
-        # We want our `data_grid` to have its y-axis increasing upwards.
-        # So, we flip the data grid. The old top row (index 0) becomes the new bottom row.
-        # The coordinates must match this new arrangement.
-        # The y-coordinate of the first row of the *original* data is `pos_y`.
-        # The y-coordinate of the last row of the *original* data is `pos_y + (height-1)*spacing_y`.
-        # Our new `y_coords` array should represent the coordinates for the new `data_grid`.
-        # The first row of the new `data_grid` (which was the last row of the old one) corresponds to `pos_y + (height-1)*spacing_y`.
-        # This means the y_coords should be descending. But the spec says they must be ascending.
-        # Let's follow the user's proposal exactly.
-
-        # Reset and follow proposal
-        y_start_new = pos_y + (height - 1) * spacing_y
-        y_coords_desc = np.arange(y_start_new, pos_y - spacing_y, -spacing_y)
-        y_coords = np.flip(y_coords_desc) # now ascending
-
-        # If the length is not correct due to floating point issues, regenerate with linspace
-        if len(y_coords) != height:
-            y_coords = np.linspace(pos_y, y_start_new, height)
-
-
-        # 3. Extract metadata
-        metadata = {
-            "filename": filename,
-            "patient_name": str(dcm.get("PatientName", "N/A")),
-            "patient_id": dcm.get("PatientID", "N/A"),
-            "institution": dcm.get("InstitutionName", "N/A"),
-            "file_type": "DICOM",
-            "dose_grid_scaling": dcm.DoseGridScaling,
-            "image_position_patient": dcm.ImagePositionPatient,
-            "pixel_spacing": dcm.PixelSpacing,
-        }
-
-        # 4. Create and return the standard data object
-        return StandardDoseData(data_grid, x_coords, y_coords, metadata)
-
-    except Exception as e:
-        logger.error(f"Failed to load DICOM file {filename}: {e}", exc_info=True)
-        raise
-
-# Helper functions for MCC loading, adapted from file_handlers.py
+# Helper functions for MCC loading
 def _detect_mcc_device_type(content: str) -> tuple[int, int]:
     """Detects device and task type from MCC file content."""
     try:
@@ -117,6 +25,7 @@ def _extract_mcc_data(lines: list[str], device_type: int) -> np.ndarray:
     try:
         scan_data_blocks = []
         in_data_block = False
+        current_block = []
         for line in lines:
             if "BEGIN_DATA" in line:
                 in_data_block = True
@@ -128,7 +37,9 @@ def _extract_mcc_data(lines: list[str], device_type: int) -> np.ndarray:
                     scan_data_blocks.append(current_block)
                 continue
             if in_data_block:
-                current_block.append(line)
+                # Ensure line is not empty and can be split
+                if line.strip():
+                    current_block.append(line)
 
         n_rows = len(scan_data_blocks)
         if n_rows == 0:
@@ -185,13 +96,12 @@ def load_mcc(filename: str, target_resolution: float = 2.0) -> StandardDoseData:
         raw_matrix = _extract_mcc_data(lines, device_type)
         height, width = raw_matrix.shape
 
-        # 2. Define physical coordinates for the raw sparse grid
+        # 2. Define physical coordinates for the raw sparse grid (Y-axis increasing upwards)
         if device_type == 2:  # 1500
             origin_x_idx, origin_y_idx, spacing = 26, 26, 5.0
         else:  # 729
             origin_x_idx, origin_y_idx, spacing = 13, 13, 10.0
 
-        # As per proposal, Y-axis increases upwards, so no negation needed
         x_coords_raw = (np.arange(width) - origin_x_idx) * spacing
         y_coords_raw = (np.arange(height) - origin_y_idx) * spacing
 
