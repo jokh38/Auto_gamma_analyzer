@@ -82,8 +82,18 @@ def perform_gamma_analysis(reference_roi: ROI_Data, evaluation_roi: ROI_Data,
         points_ref = reference_roi.source_metadata['original_points']['coords']
         doses_ref = reference_roi.source_metadata['original_points']['values']
 
+        # --- Step 1a: Filter reference points to be within the reference ROI ---
+        ref_extent = reference_roi.physical_extent
+        x_min, x_max, y_min, y_max = ref_extent[0], ref_extent[1], ref_extent[2], ref_extent[3]
+
+        mask = (points_ref[:, 0] >= x_min) & (points_ref[:, 0] <= x_max) & \
+               (points_ref[:, 1] >= y_min) & (points_ref[:, 1] <= y_max)
+
+        points_ref = points_ref[mask]
+        doses_ref = doses_ref[mask]
+
         if points_ref.size == 0:
-            raise ValueError("No valid measurement data in reference ROI.")
+            raise ValueError("No valid measurement data points found within the defined ROI.")
 
         norm_dose = np.max(doses_ref) if global_normalisation else 1.0
         if norm_dose == 0:
