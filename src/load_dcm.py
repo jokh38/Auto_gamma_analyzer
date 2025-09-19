@@ -35,7 +35,7 @@ def load_dcm(filename: str) -> StandardDoseData:
 
         # Extract spacing and origin information
         spacing_x, spacing_y = dcm.PixelSpacing
-        pos_x, pos_y, _ = dcm.ImagePositionPatient  # Corrected order
+        pos_x, pos_y, = dcm.ImagePositionPatient[0], dcm.ImagePositionPatient[2]  # Corrected order
 
         # 1. Create standardized physical coordinates (Y-axis increasing upwards)
         x_coords = (np.arange(width) * spacing_x) + pos_x
