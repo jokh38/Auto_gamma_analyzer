@@ -101,97 +101,25 @@ class PlotManager:
         self.profile_canvas = profile_canvas
         self.gamma_canvas = gamma_canvas
         self.profile_table = profile_table
-
+ 
     def generate_profile_data(self) -> dict | None:
         """
         Extracts profile data based on the current state of the DataManager.
-        This method now includes MCC data if available.
         """
         dm = self.data_manager
         if dm.profile_line is None or not dm.dicom_data:
             return None
-
-        direction = dm.profile_line["type"]
-        fixed_pos = dm.profile_line["x"] if direction == "vertical" else dm.profile_line.get("y")
-
-        if not dm.dicom_roi:
-            return None
-
-        # 1. Get DICOM profile data
+ 
+        fixed_pos = dm.profile_line.get("x") if dm.profile_line.get("type") == "vertical" else dm.profile_line.get("y")
+ 
+        # Delegate profile data generation to the analysis function
         profile_data = extract_profile_data(
-            direction=direction,
+            direction=dm.profile_line["type"],
             fixed_position=fixed_pos,
-            roi_data=dm.dicom_roi
+            dicom_roi=dm.dicom_roi,
+            mcc_roi=dm.mcc_roi
         )
-        if profile_data is None:
-            return None
-
-        # 2. If MCC data exists, add its profile and original points
-        if dm.mcc_roi and 'original_points' in dm.mcc_roi.source_metadata:
-            # a. Get interpolated MCC profile
-            mcc_profile = extract_profile_data(
-                direction=direction,
-                fixed_position=fixed_pos,
-                roi_data=dm.mcc_roi
-            )
-            if mcc_profile:
-                profile_data['mcc_interp'] = mcc_profile['dicom_values']
-
-            # b. Get original MCC points near the profile line
-            original_points = dm.mcc_roi.source_metadata['original_points']
-            coords = original_points['coords']  # Shape (N, 2) -> (x, y)
-            values = original_points['values']
-
-            # Determine a tolerance to select points. Use DICOM grid spacing.
-            # Assuming uniform spacing for simplicity.
-            if len(dm.dicom_roi.x_coords) > 1:
-                spacing_x = (dm.dicom_roi.x_coords[-1] - dm.dicom_roi.x_coords[0]) / (len(dm.dicom_roi.x_coords) - 1)
-            else:
-                spacing_x = 1.0 # Default
-
-            if len(dm.dicom_roi.y_coords) > 1:
-                spacing_y = (dm.dicom_roi.y_coords[-1] - dm.dicom_roi.y_coords[0]) / (len(dm.dicom_roi.y_coords) - 1)
-            else:
-                spacing_y = 1.0 # Default
-
-            if direction == "vertical":
-                # Profile along Y, fixed X
-                axis_idx = 0  # X-coordinate
-                profile_axis_idx = 1 # Y-coordinate
-                tolerance = spacing_x / 2.0
-            else: # "horizontal"
-                # Profile along X, fixed Y
-                axis_idx = 1  # Y-coordinate
-                profile_axis_idx = 0 # X-coordinate
-                tolerance = spacing_y / 2.0
-
-            mask = np.abs(coords[:, axis_idx] - fixed_pos) < tolerance
-
-            mcc_coords_on_profile = coords[mask]
-            if mcc_coords_on_profile.size > 0:
-                profile_data['mcc_phys_coords'] = mcc_coords_on_profile[:, profile_axis_idx]
-                profile_data['mcc_values'] = values[mask]
-
-                # c. Get DICOM dose at these specific MCC points for the table
-                # Points for interpolation need to be (y, x)
-                points_for_interp = np.fliplr(mcc_coords_on_profile)
-
-                dicom_at_mcc = interpn(
-                    (dm.dicom_roi.y_coords, dm.dicom_roi.x_coords),
-                    dm.dicom_roi.dose_grid,
-                    points_for_interp,
-                    method='linear',
-                    bounds_error=False,
-                    fill_value=np.nan
-                )
-                profile_data['dicom_at_mcc'] = dicom_at_mcc
-
-                # Sort MCC data by position for cleaner plotting
-                sort_indices = np.argsort(profile_data['mcc_phys_coords'])
-                profile_data['mcc_phys_coords'] = profile_data['mcc_phys_coords'][sort_indices]
-                profile_data['mcc_values'] = profile_data['mcc_values'][sort_indices]
-                profile_data['dicom_at_mcc'] = profile_data['dicom_at_mcc'][sort_indices]
-
+ 
         return profile_data
 
     def draw_profile(self, profile_data, profile_direction):

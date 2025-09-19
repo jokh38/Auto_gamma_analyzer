@@ -9,45 +9,97 @@ from typing import Optional
 from .standard_data_model import StandardDoseData, ROI_Data
 from .utils import logger, find_nearest_index, save_map_to_csv
 import os
-
-def extract_profile_data(direction: str, fixed_position: float,
-                         roi_data: StandardDoseData) -> Optional[dict]:
+ 
+def extract_profile_data(
+    direction: str,
+    fixed_position: float,
+    dicom_roi: ROI_Data,
+    mcc_roi: Optional[ROI_Data] = None
+) -> Optional[dict]:
     """
-    Extracts profile data from a single ROI_Data object.
+    Extracts profile data from DICOM ROI and corresponding MCC data.
 
     Args:
         direction: "vertical" or "horizontal".
         fixed_position: The fixed physical position (in mm) of the profile.
-        roi_data: The ROI_Data object to extract the profile from.
+        dicom_roi: The DICOM ROI_Data object to extract the base profile from.
+        mcc_roi: The optional MCC ROI_Data object for comparison data.
 
     Returns:
         A dictionary containing the profile data, or None if extraction fails.
     """
     profile_data = {'type': direction, 'fixed_pos': fixed_position}
-    
+
     try:
         if direction == "vertical":
             # Vertical profile: x is fixed, y is the profile axis
-            fixed_axis_coords = roi_data.x_coords
-            profile_axis_coords = roi_data.y_coords
+            fixed_axis_coords = dicom_roi.x_coords
+            profile_axis_coords = dicom_roi.y_coords
             closest_idx = find_nearest_index(fixed_axis_coords, fixed_position)
-            dicom_values = roi_data.dose_grid[:, closest_idx]
+            dicom_values = dicom_roi.dose_grid[:, closest_idx]
         else:  # "horizontal"
             # Horizontal profile: y is fixed, x is the profile axis
-            fixed_axis_coords = roi_data.y_coords
-            profile_axis_coords = roi_data.x_coords
+            fixed_axis_coords = dicom_roi.y_coords
+            profile_axis_coords = dicom_roi.x_coords
             closest_idx = find_nearest_index(fixed_axis_coords, fixed_position)
-            dicom_values = roi_data.dose_grid[closest_idx, :]
+            dicom_values = dicom_roi.dose_grid[closest_idx, :]
 
         profile_data['phys_coords'] = profile_axis_coords
         profile_data['dicom_values'] = dicom_values
 
-        # Note: MCC data processing has been removed from this function.
-        # It will be handled at a higher level (e.g., in PlotManager)
-        # to keep this function focused on simple data extraction from an ROI.
+        # 2. Process MCC data if available
+        if mcc_roi and 'original_points' in mcc_roi.source_metadata:
+            # Get a profile slice from the MCC grid
+            if direction == "vertical":
+                mcc_fixed_axis = mcc_roi.x_coords
+                mcc_profile_axis = mcc_roi.y_coords
+                mcc_slice_idx = find_nearest_index(mcc_fixed_axis, fixed_position)
+                mcc_slice_values = mcc_roi.dose_grid[:, mcc_slice_idx]
+            else: # horizontal
+                mcc_fixed_axis = mcc_roi.y_coords
+                mcc_profile_axis = mcc_roi.x_coords
+                mcc_slice_idx = find_nearest_index(mcc_fixed_axis, fixed_position)
+                mcc_slice_values = mcc_roi.dose_grid[mcc_slice_idx, :]
+
+            # Interpolate the 1D MCC slice onto the DICOM profile's coordinates
+            interp_func_mcc = interp1d(
+                mcc_profile_axis,
+                mcc_slice_values,
+                bounds_error=False,
+                fill_value=0
+            )
+            profile_data['mcc_interp'] = interp_func_mcc(profile_axis_coords)
+
+            # Find original MCC measurement points near the profile line
+            mcc_points_coords = mcc_roi.source_metadata['original_points']['coords']
+            mcc_points_values = mcc_roi.source_metadata['original_points']['values']
+
+            spacing = mcc_roi.source_metadata.get('original_spacing', 5.0)
+            tolerance = spacing / 2.0
+
+            axis_idx, profile_axis_idx = (0, 1) if direction == "vertical" else (1, 0)
+
+            mask = np.abs(mcc_points_coords[:, axis_idx] - fixed_position) < tolerance
+
+            mcc_coords_on_profile = mcc_points_coords[mask]
+            if mcc_coords_on_profile.size > 0:
+                profile_data['mcc_phys_coords'] = mcc_coords_on_profile[:, profile_axis_idx]
+                profile_data['mcc_values'] = mcc_points_values[mask]
+
+                # Interpolate DICOM dose at original MCC points for comparison table
+                interp_func_dicom = interp1d(
+                    profile_axis_coords, dicom_values, bounds_error=False, fill_value=np.nan
+                )
+                profile_data['dicom_at_mcc'] = interp_func_dicom(profile_data['mcc_phys_coords'])
+
+                # Sort MCC data by position for cleaner plotting
+                sort_indices = np.argsort(profile_data['mcc_phys_coords'])
+                profile_data['mcc_phys_coords'] = profile_data['mcc_phys_coords'][sort_indices]
+                profile_data['mcc_values'] = profile_data['mcc_values'][sort_indices]
+                profile_data['dicom_at_mcc'] = profile_data['dicom_at_mcc'][sort_indices]
 
         return profile_data
-        
+
     except Exception as e:
         logger.error(f"Profile data extraction error: {e}", exc_info=True)
         return None
