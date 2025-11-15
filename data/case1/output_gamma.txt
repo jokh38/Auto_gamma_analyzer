@@ -1,0 +1,11 @@
+output
+point dose at (0,0)
+field: dcm vs mcc (cGy)
+1G: 203.9 vs 205.0
+2G: 222.8 vs 224.3
+3G: 240.6 vs 239.1
+
+gamma (2mm, 2%)
+1G: 98.8%
+2G: 100.0%
+3G: 100.0%

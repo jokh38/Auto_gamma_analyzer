@@ -41,11 +41,11 @@ def load_dcm(filename: str) -> StandardDoseData:
         x_coords = (np.arange(width) * spacing_x) + pos_x
         y_coords = (np.arange(height) * spacing_y) + pos_y
 
-        # Data grid needs to be flipped vertically to match the ascending Y-coordinates
+        # Data grid needs to be flipped vertically to match the coordinate system
         data_grid = np.flipud(pixel_data)
 
-        # Ensure y_coords are sorted to be monotonically increasing
-        y_coords = np.sort(y_coords)
+        # Y-coordinates are now monotonically increasing after flipping the data
+        # No need to reverse y_coords as we're using the original coordinates
 
 
         # 3. Extract metadata

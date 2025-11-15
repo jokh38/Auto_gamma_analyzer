@@ -103,7 +103,7 @@ def load_mcc(filename: str, target_resolution: float = 2.0) -> StandardDoseData:
             origin_x_idx, origin_y_idx, spacing = 13, 13, 10.0
 
         x_coords_raw = (np.arange(width) - origin_x_idx) * spacing
-        y_coords_raw = -((np.arange(height) - origin_y_idx) * spacing)
+        y_coords_raw = (np.arange(height) - origin_y_idx) * spacing
 
         # 3. Convert sparse data to a dense grid via interpolation
         valid_points_indices = np.where(raw_matrix >= 0)
