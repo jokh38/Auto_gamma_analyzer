@@ -25,7 +25,7 @@ class ProfileDataTable(QTableWidget):
     def __init__(self, parent=None):
         super(ProfileDataTable, self).__init__(parent)
         self.setColumnCount(3)
-        self.setHorizontalHeaderLabels(['Position (mm)', 'RT dose (Gy)', 'Measurement'])
+        self.setHorizontalHeaderLabels(['Position (mm)', 'A (cGy)', 'B (cGy)'])
         self.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         
     def update_data(self, positions, dose_values, measurement_values=None):
@@ -33,20 +33,20 @@ class ProfileDataTable(QTableWidget):
             self.setRowCount(len(positions))
             for i, (pos, dose) in enumerate(zip(positions, dose_values)):
                 self.setItem(i, 0, QTableWidgetItem(f"{pos:.1f}"))
-                self.setItem(i, 1, QTableWidgetItem(f"{dose:.1f}"))
+                self.setItem(i, 1, QTableWidgetItem(f"{dose * 100:.1f}"))  # Convert to cGy
                 self.setItem(i, 2, QTableWidgetItem("N/A"))
         else:
             valid_indices = ~np.isnan(measurement_values)
             valid_positions = positions[valid_indices]
             valid_dose_values = dose_values[valid_indices]
             valid_measurements = measurement_values[valid_indices]
-            
+
             self.setRowCount(len(valid_positions))
-            
+
             for i, (pos, dose, meas) in enumerate(zip(valid_positions, valid_dose_values, valid_measurements)):
                 self.setItem(i, 0, QTableWidgetItem(f"{pos:.1f}"))
-                self.setItem(i, 1, QTableWidgetItem(f"{dose:.1f}"))
-                self.setItem(i, 2, QTableWidgetItem(f"{meas:.1f}"))
+                self.setItem(i, 1, QTableWidgetItem(f"{dose * 100:.1f}"))  # Convert to cGy
+                self.setItem(i, 2, QTableWidgetItem(f"{meas * 100:.1f}"))  # Convert to cGy
 
 
 def draw_image(canvas, image_data, extent, title, colorbar_label=None,
@@ -105,16 +105,31 @@ class PlotManager:
     def generate_profile_data(self) -> dict | None:
         """
         Extracts profile data based on the current state of the DataManager.
+        Uses file_a_handler and file_b_handler for A/B file comparison.
         """
         dm = self.data_manager
         if dm.profile_line is None:
             return None
 
-        # Check if handlers are available (new approach)
-        if dm.dicom_handler:
+        # Use new A/B handler approach
+        if dm.file_a_handler and dm.file_b_handler:
             fixed_pos = dm.profile_line.get("x") if dm.profile_line.get("type") == "vertical" else dm.profile_line.get("y")
 
             # Delegate profile data generation to the analysis function using handlers
+            # file_a_handler is treated as "dicom" (evaluation), file_b_handler as "mcc" (reference)
+            profile_data = extract_profile_data(
+                direction=dm.profile_line["type"],
+                fixed_position=fixed_pos,
+                dicom_handler=dm.file_a_handler,
+                mcc_handler=dm.file_b_handler
+            )
+
+            return profile_data
+
+        # Legacy fallback using old handler references
+        if dm.dicom_handler:
+            fixed_pos = dm.profile_line.get("x") if dm.profile_line.get("type") == "vertical" else dm.profile_line.get("y")
+
             profile_data = extract_profile_data(
                 direction=dm.profile_line["type"],
                 fixed_position=fixed_pos,
@@ -123,11 +138,6 @@ class PlotManager:
             )
 
             return profile_data
-
-        # Fallback to old ROI-based approach for backward compatibility
-        # TODO: Remove this once all code is migrated to handlers
-        if not dm.dicom_data:
-            return None
 
         return None
 
@@ -142,11 +152,11 @@ class PlotManager:
             phys_coords = profile_data['phys_coords']
             dicom_values = profile_data['dicom_values']
 
-            self.profile_canvas.axes.plot(phys_coords, dicom_values, 'b-', label='RT dose')
+            self.profile_canvas.axes.plot(phys_coords, dicom_values, 'b-', label='A')
 
             if 'mcc_interp' in profile_data:
-                self.profile_canvas.axes.plot(phys_coords, profile_data['mcc_interp'], 'r-', label='Measurement (interpolated)')
-                self.profile_canvas.axes.plot(profile_data['mcc_phys_coords'], profile_data['mcc_values'], 'ro', label='Measurement (original)', markersize=5)
+                self.profile_canvas.axes.plot(phys_coords, profile_data['mcc_interp'], 'r-', label='B (interpolated)')
+                self.profile_canvas.axes.plot(profile_data['mcc_phys_coords'], profile_data['mcc_values'], 'ro', label='B (original)', markersize=5)
 
             fixed_pos = self.data_manager.profile_line["x"] if self.data_manager.profile_line["type"] == "vertical" else self.data_manager.profile_line["y"]
             x_label = "Y Position (mm)" if profile_direction == "vertical" else "X Position (mm)"
@@ -178,29 +188,57 @@ class PlotManager:
             print(f"Error drawing profile: {e}") # Using print for now, logger would be better
 
     def redraw_all_images(self):
-        """Redraws the DICOM and MCC images using ROI data."""
+        """Redraws File A and File B images using handler data."""
         dm = self.data_manager
-        if dm.dicom_roi:
+
+        # Draw File A (top)
+        if dm.file_a_handler:
+            file_a_data = dm.file_a_handler.get_pixel_data()
+            file_a_extent = dm.file_a_handler.get_physical_extent()
+            if file_a_data is not None and file_a_extent is not None:
+                draw_image(
+                    canvas=self.dicom_canvas, image_data=file_a_data,
+                    extent=file_a_extent, title='File A (Top)',
+                    colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
+                    line=dm.profile_line
+                )
+        elif dm.dicom_roi:
+            # Legacy fallback
             draw_image(
                 canvas=self.dicom_canvas, image_data=dm.dicom_roi.dose_grid,
-                extent=dm.dicom_roi.physical_extent, title='DICOM RT Dose (ROI)',
+                extent=dm.dicom_roi.physical_extent, title='File A (Top)',
                 colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
                 line=dm.profile_line
             )
-        if dm.mcc_roi:
+
+        # Draw File B (bottom)
+        if dm.file_b_handler:
+            file_b_data = dm.file_b_handler.get_pixel_data()
+            file_b_extent = dm.file_b_handler.get_physical_extent()
+            if file_b_data is not None and file_b_extent is not None:
+                draw_image(
+                    canvas=self.mcc_canvas, image_data=file_b_data,
+                    extent=file_b_extent, title='File B (Bottom)',
+                    colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
+                    line=dm.profile_line
+                )
+        elif dm.mcc_roi:
+            # Legacy fallback
             draw_image(
                 canvas=self.mcc_canvas, image_data=dm.mcc_roi.dose_grid,
-                extent=dm.mcc_roi.physical_extent, title='MCC Data (ROI)',
+                extent=dm.mcc_roi.physical_extent, title='File B (Bottom)',
                 colorbar_label='Dose', show_origin=True, show_colorbar=True,
                 line=dm.profile_line
             )
 
     def draw_gamma_map(self):
-        """Draws the gamma map on the gamma canvas."""
+        """Draws the gamma map on the gamma canvas using interpolated data for smooth visualization."""
         dm = self.data_manager
         if dm.gamma_stats and 'pass_rate' in dm.gamma_stats:
+            # Use interpolated gamma map if available for smooth visualization
+            gamma_data = dm.gamma_map_interp if dm.gamma_map_interp is not None else dm.gamma_map
             draw_image(
-                canvas=self.gamma_canvas, image_data=dm.gamma_map, extent=dm.phys_extent,
+                canvas=self.gamma_canvas, image_data=gamma_data, extent=dm.phys_extent,
                 title=f'Gamma Analysis: Pass Rate = {dm.gamma_stats["pass_rate"]:.2f}%',
                 colorbar_label='Gamma Index', show_origin=True, show_colorbar=True
             )
@@ -215,12 +253,32 @@ class PlotManager:
         """
         Handles the logic for a click event on the DICOM canvas.
         This will be called by the AppController.
+        Snaps the clicked position to File B resolution if available.
         """
         dm = self.data_manager
-        if event.inaxes != self.dicom_canvas.axes or not dm.dicom_data:
+        # Check if File A is loaded (new approach) or dicom_data exists (legacy)
+        if event.inaxes != self.dicom_canvas.axes:
+            return False
+        if not dm.file_a_handler and not dm.dicom_data:
             return False
 
         phys_x, phys_y = event.xdata, event.ydata
+
+        # Snap to File B resolution if available (File B typically has lower resolution like MCC)
+        # First try file_b_handler, then fall back to mcc_handler for backward compatibility
+        spacing_handler = dm.file_b_handler if dm.file_b_handler else dm.mcc_handler
+
+        if spacing_handler:
+            spacing_x, spacing_y = spacing_handler.get_spacing()
+
+            # Snap the clicked position to the nearest grid point
+            if profile_direction == "vertical":
+                # For vertical profile, snap x position
+                phys_x = round(phys_x / spacing_x) * spacing_x
+            else:
+                # For horizontal profile, snap y position
+                phys_y = round(phys_y / spacing_y) * spacing_y
+
         dm.profile_line = {"type": profile_direction, "x": phys_x} if profile_direction == "vertical" else {"type": "horizontal", "y": phys_y}
 
         self.redraw_all_images()

@@ -26,52 +26,73 @@ class AppController:
     def run_gamma_analysis(self):
         """
         Executes the gamma analysis using parameters from the UI.
+        Automatically determines reference and evaluation handlers based on file types.
         """
         dm = self.data_manager
         view = self.main_view
 
-        # Check if handlers are available (new approach)
-        if dm.dicom_handler and dm.mcc_handler:
-            try:
-                dta = view.dta_spin.value()
-                dd = view.dd_spin.value()
-                is_global = view.gamma_type_combo.currentText() == "Global"
+        # Check if both files are loaded
+        if not dm.file_a_handler or not dm.file_b_handler:
+            QMessageBox.warning(view, "Warning", "Both File A and File B must be loaded before running gamma analysis.")
+            return
 
-                results = perform_gamma_analysis(
-                    reference_handler=dm.mcc_handler,
-                    evaluation_handler=dm.dicom_handler,
-                    dose_percent_threshold=dd,
-                    distance_mm_threshold=dta,
-                    global_normalisation=is_global
-                )
-                (
-                    dm.gamma_map, dm.gamma_stats, dm.phys_extent, dm.mcc_interp_data,
-                    dm.dd_map, dm.dta_map, dm.dd_stats, dm.dta_stats, _, _, _
-                ) = results
+        try:
+            dta = view.dta_spin.value()
+            dd = view.dd_spin.value()
+            is_global = view.gamma_type_combo.currentText() == "Global"
 
-                self.plot_manager.draw_gamma_map()
+            # Determine reference and evaluation handlers
+            # Priority: MCC as reference (measurement), DICOM as evaluation (plan)
+            # If both are same type, File B is reference, File A is evaluation
+            file_a_is_mcc = isinstance(dm.file_a_handler, MCCFileHandler)
+            file_b_is_mcc = isinstance(dm.file_b_handler, MCCFileHandler)
 
-                if 'pass_rate' in dm.gamma_stats:
-                    stats_text = f"Gamma Stats: Pass = {dm.gamma_stats['pass_rate']:.2f}% | Mean = {dm.gamma_stats['mean']:.3f} | Max = {dm.gamma_stats['max']:.3f}"
-                    view.gamma_stats_label.setText(stats_text)
-                    view.generate_report_btn.setEnabled(True)
-                else:
-                    QMessageBox.warning(view, "Warning", "No valid gamma results.")
-                    view.generate_report_btn.setEnabled(False)
+            if file_b_is_mcc and not file_a_is_mcc:
+                # Standard case: File B (MCC) is reference, File A (DICOM) is evaluation
+                reference_handler = dm.file_b_handler
+                evaluation_handler = dm.file_a_handler
+            elif file_a_is_mcc and not file_b_is_mcc:
+                # Reversed case: File A (MCC) is reference, File B (DICOM) is evaluation
+                reference_handler = dm.file_a_handler
+                evaluation_handler = dm.file_b_handler
+            else:
+                # Both are same type: File B is reference, File A is evaluation
+                reference_handler = dm.file_b_handler
+                evaluation_handler = dm.file_a_handler
 
-            except Exception as e:
-                QMessageBox.critical(view, "Error", f"Gamma analysis failed: {e}")
-                logger.error(f"Gamma analysis error: {e}", exc_info=True)
+            results = perform_gamma_analysis(
+                reference_handler=reference_handler,
+                evaluation_handler=evaluation_handler,
+                dose_percent_threshold=dd,
+                distance_mm_threshold=dta,
+                global_normalisation=is_global
+            )
+            (
+                dm.gamma_map, dm.gamma_stats, dm.phys_extent, dm.mcc_interp_data,
+                dm.dd_map, dm.dta_map, dm.dd_stats, dm.dta_stats,
+                dm.gamma_map_interp, dm.dd_map_interp, dm.dta_map_interp
+            ) = results
+
+            # Update legacy references for backward compatibility
+            if file_b_is_mcc:
+                dm.mcc_handler = dm.file_b_handler
+            if not file_a_is_mcc:
+                dm.dicom_handler = dm.file_a_handler
+
+            self.plot_manager.draw_gamma_map()
+
+            if 'pass_rate' in dm.gamma_stats:
+                stats_text = f"Gamma Stats: Pass = {dm.gamma_stats['pass_rate']:.2f}% | Mean = {dm.gamma_stats['mean']:.3f} | Max = {dm.gamma_stats['max']:.3f}"
+                view.gamma_stats_label.setText(stats_text)
+                view.generate_report_btn.setEnabled(True)
+            else:
+                QMessageBox.warning(view, "Warning", "No valid gamma results.")
                 view.generate_report_btn.setEnabled(False)
-            return
 
-        # Fallback to old ROI-based approach
-        # TODO: Remove this once all code is migrated to handlers
-        if not dm.dicom_roi or not dm.mcc_roi:
-            QMessageBox.warning(view, "Warning", "Both DICOM and Measurement data must be loaded and have valid ROIs.")
-            return
-
-        QMessageBox.warning(view, "Warning", "Please reload data files. Gamma analysis requires handler-based data loading.")
+        except Exception as e:
+            QMessageBox.critical(view, "Error", f"Gamma analysis failed: {e}")
+            logger.error(f"Gamma analysis error: {e}", exc_info=True)
+            view.generate_report_btn.setEnabled(False)
 
     def _extract_roi_from_data(self, data, threshold_percent=1.0):
         """
@@ -123,80 +144,125 @@ class AppController:
             source_metadata=data.metadata.copy()
         )
 
-    def load_dicom_file(self):
+    def load_file_a(self):
+        """Load File A (Top display) - supports both DCM and MCC files."""
         options = QFileDialog.Options()
-        filename, _ = QFileDialog.getOpenFileName(self.main_view, "Open DICOM RT Dose File", "./", "DICOM Files (*.dcm);;All Files (*)", options=options)
-        if not filename: return
-        try:
-            # Use handler-based loading
-            dicom_handler = DicomFileHandler()
-            success, error_msg = dicom_handler.open_file(filename)
+        filename, _ = QFileDialog.getOpenFileName(
+            self.main_view, "Open File A (Top)", "./",
+            "All Supported Files (*.dcm *.mcc);;DICOM Files (*.dcm);;MCC Files (*.mcc);;All Files (*)",
+            options=options
+        )
+        if not filename:
+            return
 
+        try:
+            # Determine file type and create appropriate handler
+            if filename.lower().endswith('.dcm'):
+                handler = DicomFileHandler()
+                file_type = "DICOM"
+            elif filename.lower().endswith('.mcc'):
+                handler = MCCFileHandler()
+                file_type = "MCC"
+            else:
+                raise ValueError("Unsupported file type. Please select a .dcm or .mcc file.")
+
+            success, error_msg = handler.open_file(filename)
             if not success:
                 raise Exception(error_msg)
 
             # Store handler in data manager
-            self.data_manager.dicom_handler = dicom_handler
+            self.data_manager.file_a_handler = handler
 
-            # For backward compatibility, also load using old method
-            # TODO: Remove this once all code is migrated to handlers
-            dicom_data = load_dcm(filename)
-            self.data_manager.dicom_data = dicom_data
-            self.data_manager.dicom_roi = self._extract_roi_from_data(dicom_data)
-            self.data_manager.initial_dicom_phys_coords = (self.data_manager.dicom_data.x_coords.copy(), self.data_manager.dicom_data.y_coords.copy())
-            pos_x, pos_y, _ = self.data_manager.dicom_data.metadata['image_position_patient']
-            spacing_x, spacing_y = self.data_manager.dicom_data.metadata['pixel_spacing']
-            pixel_origin_x = int(round(pos_x / spacing_x))
-            pixel_origin_y = int(round(pos_y / spacing_y))
-            self.data_manager.initial_dicom_pixel_origin = (pixel_origin_x, pixel_origin_y)
-            self.main_view.dicom_x_spin.setValue(pixel_origin_x)
-            self.main_view.dicom_y_spin.setValue(pixel_origin_y)
+            # For backward compatibility with existing code
+            if isinstance(handler, DicomFileHandler):
+                self.data_manager.dicom_handler = handler
+                dicom_data = load_dcm(filename)
+                self.data_manager.dicom_data = dicom_data
+                self.data_manager.dicom_roi = self._extract_roi_from_data(dicom_data)
+                self.data_manager.initial_dicom_phys_coords = (dicom_data.x_coords.copy(), dicom_data.y_coords.copy())
+                pos_x, pos_y, _ = dicom_data.metadata['image_position_patient']
+                spacing_x, spacing_y = dicom_data.metadata['pixel_spacing']
+                pixel_origin_x = int(round(pos_x / spacing_x))
+                pixel_origin_y = int(round(pos_y / spacing_y))
+                self.data_manager.initial_dicom_pixel_origin = (pixel_origin_x, pixel_origin_y)
+                self.main_view.dicom_x_spin.setValue(pixel_origin_x)
+                self.main_view.dicom_y_spin.setValue(pixel_origin_y)
+                self.main_view.origin_label.setText(f"Origin: ({pos_x:.2f}, {pos_y:.2f}) mm")
+
             self.plot_manager.redraw_all_images()
-            self.main_view.dicom_label.setText(f"DICOM RT Dose: {os.path.basename(filename)}")
-            self.main_view.origin_label.setText(f"DICOM Physical Origin: ({pos_x:.2f}, {pos_y:.2f}) mm")
-            if self.data_manager.mcc_data is not None:
+            self.main_view.dicom_label.setText(f"File A ({file_type}): {os.path.basename(filename)}")
+
+            if isinstance(handler, MCCFileHandler):
+                self.main_view.device_label.setText(f"Device Type: {handler.get_device_name()}")
+
+            # Auto-generate profile if both files are loaded
+            if self.data_manager.file_b_handler is not None:
                 self.set_default_profile_and_generate()
+
         except Exception as e:
-            QMessageBox.critical(self.main_view, "Error", f"Failed to load DICOM file: {e}")
-            logger.error(f"DICOM load error: {e}", exc_info=True)
+            QMessageBox.critical(self.main_view, "Error", f"Failed to load File A: {e}")
+            logger.error(f"File A load error: {e}", exc_info=True)
 
-    def load_measurement_file(self):
+    def load_dicom_file(self):
+        """Legacy method - redirects to load_file_a for backward compatibility."""
+        self.load_file_a()
+
+    def load_file_b(self):
+        """Load File B (Bottom display) - supports both DCM and MCC files."""
         options = QFileDialog.Options()
-        filename, _ = QFileDialog.getOpenFileName(self.main_view, "Open Measurement File", "./", "MCC Files (*.mcc);;All Files (*)", options=options)
-        if not filename: return
+        filename, _ = QFileDialog.getOpenFileName(
+            self.main_view, "Open File B (Bottom)", "./",
+            "All Supported Files (*.dcm *.mcc);;DICOM Files (*.dcm);;MCC Files (*.mcc);;All Files (*)",
+            options=options
+        )
+        if not filename:
+            return
+
         try:
-            if filename.lower().endswith('.mcc'):
-                # Use handler-based loading
-                mcc_handler = MCCFileHandler()
-                success, error_msg = mcc_handler.open_file(filename)
+            # Determine file type and create appropriate handler
+            if filename.lower().endswith('.dcm'):
+                handler = DicomFileHandler()
+                file_type = "DICOM"
+            elif filename.lower().endswith('.mcc'):
+                handler = MCCFileHandler()
+                file_type = "MCC"
+            else:
+                raise ValueError("Unsupported file type. Please select a .dcm or .mcc file.")
 
-                if not success:
-                    raise Exception(error_msg)
+            success, error_msg = handler.open_file(filename)
+            if not success:
+                raise Exception(error_msg)
 
-                # Store handler in data manager
-                self.data_manager.mcc_handler = mcc_handler
+            # Store handler in data manager
+            self.data_manager.file_b_handler = handler
 
-                # Crop MCC data to match DICOM bounds if DICOM is loaded
-                if self.data_manager.dicom_handler and self.data_manager.dicom_handler.dose_bounds:
-                    mcc_handler.crop_to_bounds(self.data_manager.dicom_handler.dose_bounds)
+            # Crop to match File A bounds if File A is loaded and is DICOM
+            if self.data_manager.file_a_handler and hasattr(self.data_manager.file_a_handler, 'dose_bounds'):
+                if self.data_manager.file_a_handler.dose_bounds:
+                    handler.crop_to_bounds(self.data_manager.file_a_handler.dose_bounds)
 
-                # For backward compatibility, also load using old method
-                # TODO: Remove this once all code is migrated to handlers
+            # For backward compatibility with existing code
+            if isinstance(handler, MCCFileHandler):
+                self.data_manager.mcc_handler = handler
                 mcc_data = load_mcc(filename)
                 self.data_manager.mcc_data = mcc_data
                 self.data_manager.mcc_roi = self._extract_roi_from_data(mcc_data)
-                self.plot_manager.redraw_all_images()
-                meta = self.data_manager.mcc_data.metadata
-                self.main_view.device_label.setText(f"Device Type: {mcc_handler.get_device_name()}")
-                self.main_view.mcc_label.setText(f"MCC File: {os.path.basename(filename)}")
-            else:
-                QMessageBox.warning(self.main_view, "Warning", f"Unsupported file type: {os.path.basename(filename)}")
-                return
-            if self.data_manager.dicom_data is not None:
+                self.main_view.device_label.setText(f"Device Type: {handler.get_device_name()}")
+
+            self.plot_manager.redraw_all_images()
+            self.main_view.mcc_label.setText(f"File B ({file_type}): {os.path.basename(filename)}")
+
+            # Auto-generate profile if both files are loaded
+            if self.data_manager.file_a_handler is not None:
                 self.set_default_profile_and_generate()
+
         except Exception as e:
-            QMessageBox.critical(self.main_view, "Error", f"Failed to load measurement file: {e}")
-            logger.error(f"Measurement file load error: {e}", exc_info=True)
+            QMessageBox.critical(self.main_view, "Error", f"Failed to load File B: {e}")
+            logger.error(f"File B load error: {e}", exc_info=True)
+
+    def load_measurement_file(self):
+        """Legacy method - redirects to load_file_b for backward compatibility."""
+        self.load_file_b()
 
     def set_default_profile_and_generate(self):
         self.set_profile_direction(self.main_view.profile_direction)
