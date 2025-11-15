@@ -8,11 +8,15 @@ class DataManager:
     This includes loaded files, analysis results, and intermediate data.
     """
     def __init__(self):
-        # Loaded data
+        # Loaded data (backward compatibility)
         self.dicom_data: Optional[StandardDoseData] = None
         self.mcc_data: Optional[StandardDoseData] = None
 
-        # File handlers
+        # File handlers - new generic naming for A/B files
+        self.file_a_handler = None  # Top display (previously dicom_handler)
+        self.file_b_handler = None  # Bottom display (previously mcc_handler)
+
+        # Legacy handler references for backward compatibility
         self.dicom_handler = None
         self.mcc_handler = None
 
@@ -33,6 +37,11 @@ class DataManager:
         self.gamma_stats: Optional[Dict[str, float]] = None
         self.phys_extent: Optional[List[float]] = None
         self.mcc_interp_data: Optional[np.ndarray] = None
+
+        # Interpolated maps for smooth visualization
+        self.gamma_map_interp: Optional[np.ndarray] = None
+        self.dd_map_interp: Optional[np.ndarray] = None
+        self.dta_map_interp: Optional[np.ndarray] = None
 
         # DD and DTA results
         self.dd_map: Optional[np.ndarray] = None

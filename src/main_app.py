@@ -60,8 +60,8 @@ class GammaAnalysisApp(QMainWindow):
         control_panel = QWidget()
         control_layout = QGridLayout(control_panel)
         
-        self.load_dicom_btn = QPushButton("Load DICOM RT Dose")
-        self.load_measurement_btn = QPushButton("Load Measurement File")
+        self.load_dicom_btn = QPushButton("Load File A (Top)")
+        self.load_measurement_btn = QPushButton("Load File B (Bottom)")
 
         file_group = QGroupBox("File")
         file_layout = QVBoxLayout(file_group)
@@ -134,13 +134,13 @@ class GammaAnalysisApp(QMainWindow):
         viz_layout = QGridLayout(viz_widget)
         
         self.dicom_canvas = MatplotlibCanvas(self)
-        self.dicom_label = QLabel("DICOM RT Dose: None")
+        self.dicom_label = QLabel("File A: None")
         dicom_widget = QWidget()
         QVBoxLayout(dicom_widget).addWidget(self.dicom_canvas)
         QVBoxLayout(dicom_widget).addWidget(self.dicom_label)
-        
+
         self.mcc_canvas = MatplotlibCanvas(self)
-        self.mcc_label = QLabel("Measurement File: None")
+        self.mcc_label = QLabel("File B: None")
         mcc_widget = QWidget()
         QVBoxLayout(mcc_widget).addWidget(self.mcc_canvas)
         QVBoxLayout(mcc_widget).addWidget(self.mcc_label)
