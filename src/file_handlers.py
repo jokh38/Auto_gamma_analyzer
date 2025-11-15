@@ -569,5 +569,5 @@ class MCCFileHandler(BaseFileHandler):
         full_grid_py = pixel_y + self.crop_pixel_offset[1]
 
         phys_x = (full_grid_px - self.mcc_origin_x) * self.mcc_spacing_x
-        phys_y = -(full_grid_py - self.mcc_origin_y) * self.mcc_spacing_y
+        phys_y = (full_grid_py - self.mcc_origin_y) * self.mcc_spacing_y
         return phys_x, phys_y

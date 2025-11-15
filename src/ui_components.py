@@ -58,12 +58,12 @@ def draw_image(canvas, image_data, extent, title, colorbar_label=None,
     canvas.fig.clear()
     canvas.axes = canvas.fig.add_subplot(111)
     
-    # StandardDoseData 모델은 Y축이 항상 위로 향하므로 origin을 'lower'로 통일
+    # Use origin='upper' for consistent coordinate system with reference code
     im = canvas.axes.imshow(
         image_data,
         cmap='jet',
         extent=extent,
-        origin='lower'
+        origin='upper'
     )
     
     if show_colorbar and colorbar_label is not None:
