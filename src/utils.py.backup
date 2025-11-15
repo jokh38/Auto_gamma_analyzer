@@ -7,9 +7,8 @@ import numpy as np
 from datetime import datetime
 import csv
 
-# Check and create log directory (in project root, not src/)
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-log_dir = os.path.join(project_root, 'logs')
+# Check and create log directory
+log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
