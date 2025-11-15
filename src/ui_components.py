@@ -213,12 +213,19 @@ class PlotManager:
 
         # Draw File B (bottom)
         if dm.file_b_handler:
-            file_b_data = dm.file_b_handler.get_pixel_data()
+            # Use interpolated data if option is enabled and method is available
+            if dm.use_mcc_interpolation and hasattr(dm.file_b_handler, 'get_interpolated_matrix_data'):
+                file_b_data = dm.file_b_handler.get_interpolated_matrix_data(method='cubic')
+                title_suffix = ' (Interpolated)'
+            else:
+                file_b_data = dm.file_b_handler.get_pixel_data()
+                title_suffix = ''
+
             file_b_extent = dm.file_b_handler.get_physical_extent()
             if file_b_data is not None and file_b_extent is not None:
                 draw_image(
                     canvas=self.mcc_canvas, image_data=file_b_data,
-                    extent=file_b_extent, title='File B (Bottom)',
+                    extent=file_b_extent, title=f'File B (Bottom){title_suffix}',
                     colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
                     line=dm.profile_line
                 )
