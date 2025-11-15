@@ -107,20 +107,29 @@ class PlotManager:
         Extracts profile data based on the current state of the DataManager.
         """
         dm = self.data_manager
-        if dm.profile_line is None or not dm.dicom_data:
+        if dm.profile_line is None:
             return None
- 
-        fixed_pos = dm.profile_line.get("x") if dm.profile_line.get("type") == "vertical" else dm.profile_line.get("y")
- 
-        # Delegate profile data generation to the analysis function
-        profile_data = extract_profile_data(
-            direction=dm.profile_line["type"],
-            fixed_position=fixed_pos,
-            dicom_roi=dm.dicom_roi,
-            mcc_roi=dm.mcc_roi
-        )
- 
-        return profile_data
+
+        # Check if handlers are available (new approach)
+        if dm.dicom_handler:
+            fixed_pos = dm.profile_line.get("x") if dm.profile_line.get("type") == "vertical" else dm.profile_line.get("y")
+
+            # Delegate profile data generation to the analysis function using handlers
+            profile_data = extract_profile_data(
+                direction=dm.profile_line["type"],
+                fixed_position=fixed_pos,
+                dicom_handler=dm.dicom_handler,
+                mcc_handler=dm.mcc_handler
+            )
+
+            return profile_data
+
+        # Fallback to old ROI-based approach for backward compatibility
+        # TODO: Remove this once all code is migrated to handlers
+        if not dm.dicom_data:
+            return None
+
+        return None
 
     def draw_profile(self, profile_data, profile_direction):
         """Draws the profile data on the profile canvas."""

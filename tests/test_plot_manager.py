@@ -37,20 +37,33 @@ class TestPlotManager(unittest.TestCase):
 
     def test_generate_profile_data_preparation(self):
         """
-        Tests that PlotManager correctly prepares the data needed for plotting a profile.
-        This validates the core data extraction logic before it's moved.
+        Tests that PlotManager correctly prepares the data needed for plotting a profile using handlers.
         """
-        # 1. Create PlotManager with the pre-loaded DataManager.
+        # 1. Create handlers for DICOM and MCC data
+        from src.file_handlers import DicomFileHandler, MCCFileHandler
+
+        dicom_handler = DicomFileHandler()
+        dicom_handler.open_file('example_data/1G240_2cm.dcm')
+        self.data_manager.dicom_handler = dicom_handler
+
+        mcc_handler = MCCFileHandler()
+        mcc_handler.open_file('example_data/1G240_2cm.mcc')
+        # Crop MCC to match DICOM bounds
+        if dicom_handler.dose_bounds:
+            mcc_handler.crop_to_bounds(dicom_handler.dose_bounds)
+        self.data_manager.mcc_handler = mcc_handler
+
+        # 2. Create PlotManager with the pre-loaded DataManager.
         #    We pass None for the UI components as they are not needed for this test.
         plot_manager = PlotManager(self.data_manager, None, None, None, None, None)
 
-        # 2. Call the method to generate profile data
+        # 3. Call the method to generate profile data
         profile_data = plot_manager.generate_profile_data()
 
-        # 3. Assert that the returned data is valid and well-formed
+        # 4. Assert that the returned data is valid and well-formed
         self.assertIsNotNone(profile_data, "Profile data dictionary should not be None.")
 
-        # Check for the presence of essential keys. MCC data is no longer processed here.
+        # Check for the presence of essential keys
         expected_keys = ['phys_coords', 'dicom_values']
         for key in expected_keys:
             self.assertIn(key, profile_data, f"Key '{key}' should be in profile_data.")

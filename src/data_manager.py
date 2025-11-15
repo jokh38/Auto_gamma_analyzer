@@ -12,6 +12,10 @@ class DataManager:
         self.dicom_data: Optional[StandardDoseData] = None
         self.mcc_data: Optional[StandardDoseData] = None
 
+        # File handlers
+        self.dicom_handler = None
+        self.mcc_handler = None
+
         # ROI (Region of Interest) data
         self.dicom_roi: Optional[ROI_Data] = None
         self.mcc_roi: Optional[ROI_Data] = None
