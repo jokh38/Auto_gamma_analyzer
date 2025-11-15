@@ -7,6 +7,7 @@ from src.ui_components import PlotManager
 from src.utils import logger
 from src.load_dcm import load_dcm
 from src.load_mcc import load_mcc
+from src.file_handlers import DicomFileHandler, MCCFileHandler
 from src.analysis import perform_gamma_analysis
 from src.reporting import generate_report
 from src.standard_data_model import ROI_Data
@@ -29,41 +30,48 @@ class AppController:
         dm = self.data_manager
         view = self.main_view
 
+        # Check if handlers are available (new approach)
+        if dm.dicom_handler and dm.mcc_handler:
+            try:
+                dta = view.dta_spin.value()
+                dd = view.dd_spin.value()
+                is_global = view.gamma_type_combo.currentText() == "Global"
+
+                results = perform_gamma_analysis(
+                    reference_handler=dm.mcc_handler,
+                    evaluation_handler=dm.dicom_handler,
+                    dose_percent_threshold=dd,
+                    distance_mm_threshold=dta,
+                    global_normalisation=is_global
+                )
+                (
+                    dm.gamma_map, dm.gamma_stats, dm.phys_extent, dm.mcc_interp_data,
+                    dm.dd_map, dm.dta_map, dm.dd_stats, dm.dta_stats, _, _, _
+                ) = results
+
+                self.plot_manager.draw_gamma_map()
+
+                if 'pass_rate' in dm.gamma_stats:
+                    stats_text = f"Gamma Stats: Pass = {dm.gamma_stats['pass_rate']:.2f}% | Mean = {dm.gamma_stats['mean']:.3f} | Max = {dm.gamma_stats['max']:.3f}"
+                    view.gamma_stats_label.setText(stats_text)
+                    view.generate_report_btn.setEnabled(True)
+                else:
+                    QMessageBox.warning(view, "Warning", "No valid gamma results.")
+                    view.generate_report_btn.setEnabled(False)
+
+            except Exception as e:
+                QMessageBox.critical(view, "Error", f"Gamma analysis failed: {e}")
+                logger.error(f"Gamma analysis error: {e}", exc_info=True)
+                view.generate_report_btn.setEnabled(False)
+            return
+
+        # Fallback to old ROI-based approach
+        # TODO: Remove this once all code is migrated to handlers
         if not dm.dicom_roi or not dm.mcc_roi:
             QMessageBox.warning(view, "Warning", "Both DICOM and Measurement data must be loaded and have valid ROIs.")
             return
 
-        try:
-            dta = view.dta_spin.value()
-            dd = view.dd_spin.value()
-            is_global = view.gamma_type_combo.currentText() == "Global"
-
-            results = perform_gamma_analysis(
-                reference_roi=dm.mcc_roi,
-                evaluation_roi=dm.dicom_roi,
-                dose_percent_threshold=dd,
-                distance_mm_threshold=dta,
-                global_normalisation=is_global
-            )
-            (
-                dm.gamma_map, dm.gamma_stats, dm.phys_extent, dm.mcc_interp_data,
-                dm.dd_map, dm.dta_map, dm.dd_stats, dm.dta_stats
-            ) = results
-
-            self.plot_manager.draw_gamma_map()
-
-            if 'pass_rate' in dm.gamma_stats:
-                stats_text = f"Gamma Stats: Pass = {dm.gamma_stats['pass_rate']:.2f}% | Mean = {dm.gamma_stats['mean']:.3f} | Max = {dm.gamma_stats['max']:.3f}"
-                view.gamma_stats_label.setText(stats_text)
-                view.generate_report_btn.setEnabled(True)
-            else:
-                QMessageBox.warning(view, "Warning", "No valid gamma results.")
-                view.generate_report_btn.setEnabled(False)
-
-        except Exception as e:
-            QMessageBox.critical(view, "Error", f"Gamma analysis failed: {e}")
-            logger.error(f"Gamma analysis error: {e}", exc_info=True)
-            view.generate_report_btn.setEnabled(False)
+        QMessageBox.warning(view, "Warning", "Please reload data files. Gamma analysis requires handler-based data loading.")
 
     def _extract_roi_from_data(self, data, threshold_percent=1.0):
         """
@@ -120,6 +128,18 @@ class AppController:
         filename, _ = QFileDialog.getOpenFileName(self.main_view, "Open DICOM RT Dose File", "./", "DICOM Files (*.dcm);;All Files (*)", options=options)
         if not filename: return
         try:
+            # Use handler-based loading
+            dicom_handler = DicomFileHandler()
+            success, error_msg = dicom_handler.open_file(filename)
+
+            if not success:
+                raise Exception(error_msg)
+
+            # Store handler in data manager
+            self.data_manager.dicom_handler = dicom_handler
+
+            # For backward compatibility, also load using old method
+            # TODO: Remove this once all code is migrated to handlers
             dicom_data = load_dcm(filename)
             self.data_manager.dicom_data = dicom_data
             self.data_manager.dicom_roi = self._extract_roi_from_data(dicom_data)
@@ -146,12 +166,28 @@ class AppController:
         if not filename: return
         try:
             if filename.lower().endswith('.mcc'):
+                # Use handler-based loading
+                mcc_handler = MCCFileHandler()
+                success, error_msg = mcc_handler.open_file(filename)
+
+                if not success:
+                    raise Exception(error_msg)
+
+                # Store handler in data manager
+                self.data_manager.mcc_handler = mcc_handler
+
+                # Crop MCC data to match DICOM bounds if DICOM is loaded
+                if self.data_manager.dicom_handler and self.data_manager.dicom_handler.dose_bounds:
+                    mcc_handler.crop_to_bounds(self.data_manager.dicom_handler.dose_bounds)
+
+                # For backward compatibility, also load using old method
+                # TODO: Remove this once all code is migrated to handlers
                 mcc_data = load_mcc(filename)
                 self.data_manager.mcc_data = mcc_data
                 self.data_manager.mcc_roi = self._extract_roi_from_data(mcc_data)
                 self.plot_manager.redraw_all_images()
                 meta = self.data_manager.mcc_data.metadata
-                self.main_view.device_label.setText(f"Device Type: {meta['device']}")
+                self.main_view.device_label.setText(f"Device Type: {mcc_handler.get_device_name()}")
                 self.main_view.mcc_label.setText(f"MCC File: {os.path.basename(filename)}")
             else:
                 QMessageBox.warning(self.main_view, "Warning", f"Unsupported file type: {os.path.basename(filename)}")

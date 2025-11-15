@@ -34,6 +34,17 @@ class TestDataManager(unittest.TestCase):
         # Check that the old dose_bounds attribute is gone
         self.assertFalse(hasattr(self.data_manager, 'dose_bounds'), "DataManager should no longer have 'dose_bounds' attribute")
 
+    def test_handler_attributes(self):
+        """
+        Tests that the DataManager has handler attributes for file handling.
+        """
+        # Check that handler attributes exist and are None
+        self.assertTrue(hasattr(self.data_manager, 'dicom_handler'), "DataManager should have 'dicom_handler' attribute")
+        self.assertIsNone(self.data_manager.dicom_handler, "dicom_handler should be initialized to None")
+
+        self.assertTrue(hasattr(self.data_manager, 'mcc_handler'), "DataManager should have 'mcc_handler' attribute")
+        self.assertIsNone(self.data_manager.mcc_handler, "mcc_handler should be initialized to None")
+
     def test_dicom_data_assignment(self):
         """
         Tests that DICOM data can be loaded and assigned to the DataManager.

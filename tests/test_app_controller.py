@@ -94,61 +94,100 @@ class TestAppController(unittest.TestCase):
 
 
     @patch('src.app_controller.load_dcm')
-    @patch('src.app_controller.load_mcc')
+    @patch('src.app_controller.DicomFileHandler')
     @patch('src.app_controller.QFileDialog.getOpenFileName')
-    def test_load_files_creates_roi(self, mock_get_open_filename, mock_load_mcc, mock_load_dcm):
+    def test_load_dicom_uses_handler(self, mock_get_open_filename, mock_handler_class, mock_load_dcm):
         """
-        Tests that loading files correctly calls the ROI extraction and populates the DataManager.
+        Tests that loading a DICOM file uses DicomFileHandler.
         """
-        # 1. Given: Mock the file dialog and data loaders
-        # Mock file dialog to return a dummy path
+        # 1. Given: Mock the file dialog and handler
         mock_get_open_filename.return_value = ('dummy_path.dcm', '')
 
-        # Mock loaders to return a more realistic StandardDoseData object
+        # Create a mock handler instance
+        mock_handler = MagicMock()
+        mock_handler.open_file.return_value = (True, None)
+        mock_handler.get_pixel_data.return_value = np.ones((10, 10))
+        mock_handler.phys_x_mesh = np.ones((10, 10))
+        mock_handler.phys_y_mesh = np.ones((10, 10))
+        mock_handler_class.return_value = mock_handler
+
+        # Mock load_dcm for backward compatibility
         mock_dicom_data = MagicMock(spec=StandardDoseData)
-        mock_dicom_data.x_coords = np.array([])
-        mock_dicom_data.y_coords = np.array([])
+        mock_dicom_data.x_coords = np.array([0, 1, 2])
+        mock_dicom_data.y_coords = np.array([0, 1, 2])
         mock_dicom_data.metadata = {'image_position_patient': [0,0,0], 'pixel_spacing': [1,1]}
         mock_load_dcm.return_value = mock_dicom_data
 
-        # Mock the ROI extraction function to track its calls and return a specific ROI_Data object
+        # Mock ROI extraction
         mock_roi_data = MagicMock(spec=ROI_Data)
         mock_roi_data.dose_grid = np.array([[1]])
         mock_roi_data.physical_extent = [0,1,0,1]
-        mock_roi_data.x_coords = np.array([0])
-        mock_roi_data.y_coords = np.array([0])
-        # Add source_metadata to prevent AttributeError in the modified generate_profile_data
-        mock_roi_data.source_metadata = {}
         self.controller._extract_roi_from_data = MagicMock(return_value=mock_roi_data)
 
         # 2. When: Call the load_dicom_file method
         self.controller.load_dicom_file()
 
-        # 3. Then: Assert that ROI extraction was called and the result was stored
-        self.controller._extract_roi_from_data.assert_called_once_with(mock_dicom_data)
-        self.assertIs(self.data_manager.dicom_roi, mock_roi_data)
+        # 3. Then: Assert that handler was created and used
+        mock_handler_class.assert_called_once()
+        mock_handler.open_file.assert_called_once_with('dummy_path.dcm')
+        self.assertIs(self.data_manager.dicom_handler, mock_handler)
 
-        # --- Test MCC loading ---
-        # Reset mocks for the next part of the test
-        self.controller._extract_roi_from_data.reset_mock()
+    @patch('src.app_controller.load_mcc')
+    @patch('src.app_controller.MCCFileHandler')
+    @patch('src.app_controller.QFileDialog.getOpenFileName')
+    def test_load_mcc_uses_handler(self, mock_get_open_filename, mock_handler_class, mock_load_mcc):
+        """
+        Tests that loading an MCC file uses MCCFileHandler.
+        """
+        # 1. Given: Mock the file dialog and handler
         mock_get_open_filename.return_value = ('dummy_path.mcc', '')
+
+        # Create a mock handler instance
+        mock_handler = MagicMock()
+        mock_handler.open_file.return_value = (True, None)
+        mock_handler.get_matrix_data.return_value = np.ones((10, 10))
+        mock_handler.get_device_name.return_value = "OCTAVIUS 725"
+        mock_handler_class.return_value = mock_handler
+
+        # Mock load_mcc for backward compatibility
         mock_mcc_data = MagicMock(spec=StandardDoseData)
-        mock_mcc_data.metadata = {'device': 'test_device'}
+        mock_mcc_data.metadata = {'device': 'OCTAVIUS 725'}
         mock_load_mcc.return_value = mock_mcc_data
 
-        # When: Call the load_measurement_file method
+        # Mock ROI extraction
+        mock_roi_data = MagicMock(spec=ROI_Data)
+        mock_roi_data.dose_grid = np.array([[1]])
+        mock_roi_data.physical_extent = [0,1,0,1]
+        self.controller._extract_roi_from_data = MagicMock(return_value=mock_roi_data)
+
+        # 2. When: Call the load_measurement_file method
         self.controller.load_measurement_file()
 
-        # Then: Assert that ROI extraction was called and the result was stored
-        self.controller._extract_roi_from_data.assert_called_once_with(mock_mcc_data)
-        self.assertIs(self.data_manager.mcc_roi, mock_roi_data)
+        # 3. Then: Assert that handler was created and used
+        mock_handler_class.assert_called_once()
+        mock_handler.open_file.assert_called_once_with('dummy_path.mcc')
+        self.assertIs(self.data_manager.mcc_handler, mock_handler)
 
 
     def test_run_gamma_analysis_logic(self):
         """
-        Tests that AppController correctly runs gamma analysis and populates the DataManager.
+        Tests that AppController correctly runs gamma analysis using handlers.
         """
-        # Given: Manually create ROIs since setUp no longer does it.
+        # Given: Create handlers for DICOM and MCC data
+        from src.file_handlers import DicomFileHandler, MCCFileHandler
+
+        dicom_handler = DicomFileHandler()
+        dicom_handler.open_file('example_data/1G240_2cm.dcm')
+        self.data_manager.dicom_handler = dicom_handler
+
+        mcc_handler = MCCFileHandler()
+        mcc_handler.open_file('example_data/1G240_2cm.mcc')
+        # Crop MCC to match DICOM bounds
+        if dicom_handler.dose_bounds:
+            mcc_handler.crop_to_bounds(dicom_handler.dose_bounds)
+        self.data_manager.mcc_handler = mcc_handler
+
+        # Also set ROIs for backward compatibility
         self.data_manager.dicom_roi = self.controller._extract_roi_from_data(self.data_manager.dicom_data)
         self.data_manager.mcc_roi = self.controller._extract_roi_from_data(self.data_manager.mcc_data)
 
