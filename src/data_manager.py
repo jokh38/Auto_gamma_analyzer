@@ -48,3 +48,6 @@ class DataManager:
         self.dta_map: Optional[np.ndarray] = None
         self.dd_stats: Optional[Dict[str, float]] = None
         self.dta_stats: Optional[Dict[str, float]] = None
+
+        # Display options
+        self.use_mcc_interpolation: bool = True  # Use interpolated MCC data for smoother visualization
