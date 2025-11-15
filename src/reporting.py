@@ -83,7 +83,7 @@ def generate_report(
     dicom_data = dicom_handler.get_pixel_data()
     dicom_extent = dicom_handler.get_physical_extent()
     if dicom_data is not None and dicom_extent is not None:
-        im_dicom = ax_dicom.imshow(dicom_data, cmap='jet', extent=dicom_extent, aspect='equal', origin='upper')
+        im_dicom = ax_dicom.imshow(dicom_data, cmap='jet', extent=dicom_extent, aspect='equal', origin='lower')
         cbar_dicom = fig.colorbar(im_dicom, ax=ax_dicom, label='Dose (Gy)', orientation='vertical', pad=0.02)
     ax_dicom.set_title('DICOM RT Dose', fontsize=12, weight='bold')
     ax_dicom.set_xlabel('Position (mm)', fontsize=10)
@@ -93,7 +93,7 @@ def generate_report(
     ax_mcc = fig.add_subplot(gs[1, 1])
     # mcc_interp_data is on the (cropped) DICOM grid
     if mcc_interp_data is not None and dicom_extent is not None:
-        im_mcc = ax_mcc.imshow(mcc_interp_data, cmap='jet', extent=dicom_extent, aspect='equal', origin='upper')
+        im_mcc = ax_mcc.imshow(mcc_interp_data, cmap='jet', extent=dicom_extent, aspect='equal', origin='lower')
         cbar_mcc = fig.colorbar(im_mcc, ax=ax_mcc, label='Dose (Gy)', orientation='vertical', pad=0.02)
 
     ax_mcc.set_title('MCC Dose (Interpolated)', fontsize=12, weight='bold')
@@ -137,13 +137,13 @@ def generate_report(
     ax_gamma = fig.add_subplot(gs[1, 2])
     if gamma_map_interp is not None and dicom_extent is not None:
         # Use interpolated gamma map on DICOM grid (no gaps)
-        im_gamma = ax_gamma.imshow(gamma_map_interp, cmap='coolwarm', extent=dicom_extent, vmin=0, vmax=2, aspect='equal', origin='upper', interpolation='bilinear')
+        im_gamma = ax_gamma.imshow(gamma_map_interp, cmap='coolwarm', extent=dicom_extent, vmin=0, vmax=2, aspect='equal', origin='lower', interpolation='bilinear')
         cbar_gamma = fig.colorbar(im_gamma, ax=ax_gamma, label='Gamma Index', orientation='vertical', pad=0.02)
     elif gamma_map is not None:
         # Fallback to sparse gamma map on MCC grid
         mcc_extent = mcc_handler.get_physical_extent()
         if mcc_extent is not None:
-            im_gamma = ax_gamma.imshow(gamma_map, cmap='coolwarm', extent=mcc_extent, vmin=0, vmax=2, aspect='equal', origin='upper')
+            im_gamma = ax_gamma.imshow(gamma_map, cmap='coolwarm', extent=mcc_extent, vmin=0, vmax=2, aspect='equal', origin='lower')
             cbar_gamma = fig.colorbar(im_gamma, ax=ax_gamma, label='Gamma Index', orientation='vertical', pad=0.02)
 
     ax_gamma.set_title(f'Gamma Analysis', fontsize=12, weight='bold')
@@ -220,13 +220,13 @@ def generate_report(
         ax_dd = fig.add_subplot(gs[2, 2])
         if dd_map_interp is not None and dicom_extent is not None:
             # Use interpolated DD map on DICOM grid (no gaps)
-            im_dd = ax_dd.imshow(dd_map_interp, cmap='viridis', extent=dicom_extent, aspect='equal', origin='upper', interpolation='bilinear')
+            im_dd = ax_dd.imshow(dd_map_interp, cmap='viridis', extent=dicom_extent, aspect='equal', origin='lower', interpolation='bilinear')
             cbar_dd = fig.colorbar(im_dd, ax=ax_dd, label='DD (%)', orientation='vertical', pad=0.02)
         elif dd_map is not None:
             # Fallback to sparse DD map on MCC grid
             mcc_extent = mcc_handler.get_physical_extent()
             if mcc_extent is not None:
-                im_dd = ax_dd.imshow(dd_map, cmap='viridis', extent=mcc_extent, aspect='equal', origin='upper')
+                im_dd = ax_dd.imshow(dd_map, cmap='viridis', extent=mcc_extent, aspect='equal', origin='lower')
                 cbar_dd = fig.colorbar(im_dd, ax=ax_dd, label='DD (%)', orientation='vertical', pad=0.02)
 
         ax_dd.set_title(f'Dose Difference (DD) Map', fontsize=12, weight='bold')
@@ -238,13 +238,13 @@ def generate_report(
         ax_dta = fig.add_subplot(gs[2, 3])
         if dta_map_interp is not None and dicom_extent is not None:
             # Use interpolated DTA map on DICOM grid (no gaps)
-            im_dta = ax_dta.imshow(dta_map_interp, cmap='plasma', extent=dicom_extent, aspect='equal', origin='upper', interpolation='bilinear')
+            im_dta = ax_dta.imshow(dta_map_interp, cmap='plasma', extent=dicom_extent, aspect='equal', origin='lower', interpolation='bilinear')
             cbar_dta = fig.colorbar(im_dta, ax=ax_dta, label='DTA (mm)', orientation='vertical', pad=0.02)
         elif dta_map is not None:
             # Fallback to sparse DTA map on MCC grid
             mcc_extent = mcc_handler.get_physical_extent()
             if mcc_extent is not None:
-                im_dta = ax_dta.imshow(dta_map, cmap='plasma', extent=mcc_extent, aspect='equal', origin='upper')
+                im_dta = ax_dta.imshow(dta_map, cmap='plasma', extent=mcc_extent, aspect='equal', origin='lower')
                 cbar_dta = fig.colorbar(im_dta, ax=ax_dta, label='DTA (mm)', orientation='vertical', pad=0.02)
 
         ax_dta.set_title(f'Distance to Agreement (DTA) Map', fontsize=12, weight='bold')

@@ -76,8 +76,13 @@ class AppController:
             # Update legacy references for backward compatibility
             if file_b_is_mcc:
                 dm.mcc_handler = dm.file_b_handler
+            elif file_a_is_mcc:
+                dm.mcc_handler = dm.file_a_handler
+
             if not file_a_is_mcc:
                 dm.dicom_handler = dm.file_a_handler
+            elif not file_b_is_mcc:
+                dm.dicom_handler = dm.file_b_handler
 
             self.plot_manager.draw_gamma_map()
 
@@ -307,32 +312,54 @@ class AppController:
         if self.data_manager.gamma_stats is None:
             QMessageBox.warning(self.main_view, "Warning", "Run gamma analysis first.")
             return
+
+        dm = self.data_manager
+
+        # Check if handlers are available
+        if not dm.dicom_handler or not dm.mcc_handler:
+            QMessageBox.warning(self.main_view, "Warning", "Both DICOM and MCC handlers must be available to generate report.")
+            return
+
         try:
             base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
             report_dir = os.path.join(base_dir, 'Report')
             os.makedirs(report_dir, exist_ok=True)
-            patient_id = self.data_manager.dicom_data.metadata.get('patient_id', 'Unknown')
-            dicom_filename_base = os.path.splitext(os.path.basename(self.data_manager.dicom_data.metadata.get('filename', 'file')))[0]
+
+            # Get patient info from DICOM handler
+            institution, patient_id, patient_name = dm.dicom_handler.get_patient_info()
+            dicom_filename = dm.dicom_handler.get_filename()
+            dicom_filename_base = os.path.splitext(dicom_filename)[0] if dicom_filename else 'file'
+
             default_path = os.path.join(report_dir, f"report_{patient_id}_{dicom_filename_base}.jpg")
             output_path, _ = QFileDialog.getSaveFileName(self.main_view, "Save Report", default_path, "JPEG Image (*.jpg *.jpeg);;PDF Document (*.pdf)")
             if not output_path: return
 
-            original_profile_line = self.data_manager.profile_line
-            self.data_manager.profile_line = {"type": "vertical", "x": 0}
+            original_profile_line = dm.profile_line
+            dm.profile_line = {"type": "vertical", "x": 0}
             ver_profile = self.plot_manager.generate_profile_data()
-            self.data_manager.profile_line = {"type": "horizontal", "y": 0}
+            dm.profile_line = {"type": "horizontal", "y": 0}
             hor_profile = self.plot_manager.generate_profile_data()
-            self.data_manager.profile_line = original_profile_line
+            dm.profile_line = original_profile_line
 
-            # The dose_bounds argument is replaced by the ROI's extent.
-            report_extent = self.data_manager.dicom_roi.physical_extent if self.data_manager.dicom_roi else None
             generate_report(
-                output_path=output_path, dicom_data=self.data_manager.dicom_data, mcc_data=self.data_manager.mcc_data,
-                gamma_map=self.data_manager.gamma_map, gamma_stats=self.data_manager.gamma_stats,
-                dta=self.main_view.dta_spin.value(), dd=self.main_view.dd_spin.value(), suppression_level=10,
-                ver_profile_data=ver_profile, hor_profile_data=hor_profile,
-                mcc_interp_data=self.data_manager.mcc_interp_data, dd_stats=self.data_manager.dd_stats, dta_stats=self.data_manager.dta_stats,
-                dose_bounds=report_extent
+                output_path=output_path,
+                dicom_handler=dm.dicom_handler,
+                mcc_handler=dm.mcc_handler,
+                gamma_map=dm.gamma_map,
+                gamma_stats=dm.gamma_stats,
+                dta=self.main_view.dta_spin.value(),
+                dd=self.main_view.dd_spin.value(),
+                suppression_level=10,
+                ver_profile_data=ver_profile,
+                hor_profile_data=hor_profile,
+                mcc_interp_data=dm.mcc_interp_data,
+                dd_map=dm.dd_map,
+                dta_map=dm.dta_map,
+                dd_stats=dm.dd_stats,
+                dta_stats=dm.dta_stats,
+                gamma_map_interp=dm.gamma_map_interp,
+                dd_map_interp=dm.dd_map_interp,
+                dta_map_interp=dm.dta_map_interp
             )
             QMessageBox.information(self.main_view, "Success", f"Report saved to:\n{output_path}")
         except Exception as e:
