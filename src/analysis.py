@@ -105,11 +105,12 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
                 if len(mcc_values) > 1:
                     # The coordinate arrays are now guaranteed to be ascending,
                     # so we can interpolate directly.
-                    # Use extrapolation to extend the interpolated line beyond MCC data points
+                    # Limit interpolation to measured range only (no extrapolation)
                     mcc_interp = np.interp(
                         profile_coords_dicom,
                         mcc_phys_coords,
-                        mcc_values
+                        mcc_values,
+                        left=np.nan, right=np.nan
                     )
                     profile_data['mcc_interp'] = mcc_interp
 
