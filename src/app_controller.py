@@ -247,9 +247,10 @@ class AppController:
                     handler.crop_to_bounds(self.data_manager.file_a_handler.dose_bounds)
 
             # For backward compatibility with existing code
+            # Use load_mcc() as the primary loader for standardized data processing
             if isinstance(handler, MCCFileHandler):
-                self.data_manager.mcc_handler = handler
-                mcc_data = load_mcc(filename)
+                self.data_manager.mcc_handler = handler  # Keep handler for legacy methods
+                mcc_data = load_mcc(filename)  # Primary loader with standardized interpolation (fill_value=0.0)
                 self.data_manager.mcc_data = mcc_data
                 self.data_manager.mcc_roi = self._extract_roi_from_data(mcc_data)
                 self.main_view.device_label.setText(f"Device Type: {handler.get_device_name()}")

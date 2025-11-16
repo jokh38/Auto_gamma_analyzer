@@ -365,7 +365,8 @@ class MCCFileHandler(BaseFileHandler):
             np.array(list(zip(valid_points_indices[0], valid_points_indices[1]))),
             data[valid_points_indices],
             (grid_y, grid_x),
-            method=method
+            method=method,
+            fill_value=0.0
         )
         return interpolated_data
 
