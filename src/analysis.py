@@ -89,11 +89,12 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
 
                 mcc_values = mcc_line_values[valid_indices]
 
-                # For vertical profiles, the physical y-coordinate is descending.
-                # We sort it here to ensure all subsequent operations use ascending coordinates.
-                if sort_required:
-                    mcc_phys_coords = mcc_phys_coords[::-1]
-                    mcc_values = mcc_values[::-1]
+                # matrix_data가 flipud되어 이미 올바른 순서이므로 역순 정렬 불필요
+                # Before: MCC는 y=-130→130 순서여서 수동 정렬 필요했음
+                # After: flipud 후 y=130→-130 순서로 DICOM과 동일
+                # if sort_required:  # 삭제됨 - flipud로 자동 해결
+                #     mcc_phys_coords = mcc_phys_coords[::-1]
+                #     mcc_values = mcc_values[::-1]
 
                 # Find corresponding DICOM values at MCC measurement points
                 dicom_at_mcc_positions = np.array([
@@ -171,7 +172,9 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
         full_grid_px = x_pix + handler.crop_pixel_offset[0]
         full_grid_py = y_pix + handler.crop_pixel_offset[1]
         phys_x_all = (full_grid_px - handler.mcc_origin_x) * handler.mcc_spacing_x
-        phys_y_all = (full_grid_py - handler.mcc_origin_y) * handler.mcc_spacing_y
+        # Y축 음수 부호: pixel_to_physical_coord()와 동일한 변환 규칙 적용
+        # matrix_data가 flipud되었으므로 음수 부호로 좌표 일관성 유지
+        phys_y_all = -(full_grid_py - handler.mcc_origin_y) * handler.mcc_spacing_y
         all_mcc_coords_phys = np.vstack((phys_x_all, phys_y_all)).T
 
         all_mcc_dose_values = mcc_dose_data[all_valid_indices]
