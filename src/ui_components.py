@@ -2,6 +2,7 @@ import numpy as np
 from scipy.interpolate import interpn
 from scipy.interpolate import interpn
 from PyQt5 import QtWidgets
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -32,9 +33,17 @@ class ProfileDataTable(QTableWidget):
         if measurement_values is None or len(measurement_values) == 0:
             self.setRowCount(len(positions))
             for i, (pos, dose) in enumerate(zip(positions, dose_values)):
-                self.setItem(i, 0, QTableWidgetItem(f"{pos:.1f}"))
-                self.setItem(i, 1, QTableWidgetItem(f"{dose * 100:.1f}"))  # Convert to cGy
-                self.setItem(i, 2, QTableWidgetItem("N/A"))
+                item_pos = QTableWidgetItem(f"{pos:.1f}")
+                item_pos.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.setItem(i, 0, item_pos)
+
+                item_dose = QTableWidgetItem(f"{dose * 100:.1f}")  # Convert to cGy
+                item_dose.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.setItem(i, 1, item_dose)
+
+                item_na = QTableWidgetItem("N/A")
+                item_na.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.setItem(i, 2, item_na)
         else:
             valid_indices = ~np.isnan(measurement_values)
             valid_positions = positions[valid_indices]
@@ -44,9 +53,17 @@ class ProfileDataTable(QTableWidget):
             self.setRowCount(len(valid_positions))
 
             for i, (pos, dose, meas) in enumerate(zip(valid_positions, valid_dose_values, valid_measurements)):
-                self.setItem(i, 0, QTableWidgetItem(f"{pos:.1f}"))
-                self.setItem(i, 1, QTableWidgetItem(f"{dose * 100:.1f}"))  # Convert to cGy
-                self.setItem(i, 2, QTableWidgetItem(f"{meas * 100:.1f}"))  # Convert to cGy
+                item_pos = QTableWidgetItem(f"{pos:.1f}")
+                item_pos.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.setItem(i, 0, item_pos)
+
+                item_dose = QTableWidgetItem(f"{dose * 100:.1f}")  # Convert to cGy
+                item_dose.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.setItem(i, 1, item_dose)
+
+                item_meas = QTableWidgetItem(f"{meas * 100:.1f}")  # Convert to cGy
+                item_meas.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.setItem(i, 2, item_meas)
 
 
 def draw_image(canvas, image_data, extent, title, colorbar_label=None,
@@ -101,6 +118,7 @@ class PlotManager:
         self.profile_canvas = profile_canvas
         self.gamma_canvas = gamma_canvas
         self.profile_table = profile_table
+        self.profile_y_max = None  # Store max dose for consistent Y-axis scaling
  
     def generate_profile_data(self) -> dict | None:
         """
@@ -171,6 +189,38 @@ class PlotManager:
                 lims = (extent[2], extent[3]) if profile_direction == "vertical" else (extent[0], extent[1])
                 self.profile_canvas.axes.set_xlim(lims)
 
+            # Set fixed Y-axis limits based on max dose (110% of max)
+            # Calculate and store max dose on first profile draw or when data changes
+            if self.profile_y_max is None:
+                # Get max dose from both datasets
+                max_dose_a = np.max(dicom_values) if len(dicom_values) > 0 else 0
+                max_dose_b = 0
+                if 'mcc_interp' in profile_data:
+                    mcc_interp_valid = profile_data['mcc_interp'][~np.isnan(profile_data['mcc_interp'])]
+                    max_dose_b = np.max(mcc_interp_valid) if len(mcc_interp_valid) > 0 else 0
+                elif 'mcc_values' in profile_data:
+                    max_dose_b = np.max(profile_data['mcc_values']) if len(profile_data['mcc_values']) > 0 else 0
+
+                # Use the overall max from the entire dataset if available
+                if self.data_manager.file_a_handler:
+                    data_a = self.data_manager.file_a_handler.get_pixel_data()
+                    if data_a is not None:
+                        max_dose_a = np.max(data_a)
+
+                if self.data_manager.file_b_handler:
+                    data_b = self.data_manager.file_b_handler.get_pixel_data()
+                    if data_b is not None:
+                        # Filter out invalid MCC data points
+                        valid_b = data_b[data_b >= 0]
+                        if len(valid_b) > 0:
+                            max_dose_b = np.max(valid_b)
+
+                self.profile_y_max = max(max_dose_a, max_dose_b)
+
+            # Set Y-axis limits to 110% of max dose
+            if self.profile_y_max > 0:
+                self.profile_canvas.axes.set_ylim([0, self.profile_y_max * 1.1])
+
             self.profile_canvas.axes.legend()
             self.profile_canvas.axes.grid(True)
             self.profile_canvas.fig.tight_layout()
@@ -190,6 +240,9 @@ class PlotManager:
     def redraw_all_images(self):
         """Redraws File A and File B images using handler data."""
         dm = self.data_manager
+
+        # Reset profile Y-axis max when redrawing images (e.g., when new files are loaded)
+        self.profile_y_max = None
 
         # Draw File A (top)
         if dm.file_a_handler:
@@ -213,15 +266,17 @@ class PlotManager:
 
         # Draw File B (bottom)
         if dm.file_b_handler:
-            # Use interpolated data if option is enabled and method is available
-            if dm.use_mcc_interpolation and hasattr(dm.file_b_handler, 'get_interpolated_matrix_data'):
-                file_b_data = dm.file_b_handler.get_interpolated_matrix_data(method='cubic')
+            # Use mcc_interp_data if available (same resolution as DICOM/report)
+            if dm.use_mcc_interpolation and dm.mcc_interp_data is not None:
+                file_b_data = dm.mcc_interp_data
+                # Use DICOM extent since mcc_interp_data is on DICOM grid
+                file_b_extent = dm.file_a_handler.get_physical_extent() if dm.file_a_handler else dm.file_b_handler.get_physical_extent()
                 title_suffix = ' (Interpolated)'
             else:
                 file_b_data = dm.file_b_handler.get_pixel_data()
+                file_b_extent = dm.file_b_handler.get_physical_extent()
                 title_suffix = ''
 
-            file_b_extent = dm.file_b_handler.get_physical_extent()
             if file_b_data is not None and file_b_extent is not None:
                 draw_image(
                     canvas=self.mcc_canvas, image_data=file_b_data,
