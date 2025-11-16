@@ -393,7 +393,13 @@ class MCCFileHandler(BaseFileHandler):
 
             N_begin = content.count("BEGIN_DATA")
             self.n_rows = N_begin
-            self.matrix_data = self.extract_data(lines, N_begin, self.device_type, self.task_type)
+
+            # MCC 파일은 Y축이 -130 → 130 순서로 배열되어 있으므로 flipud 필요
+            # DICOM과 일관성: array[0, :] = y_max (위쪽 데이터)
+            # Before flipud: matrix_data[0, :] = y_min (아래쪽) → UI에서 상하반전 발생
+            # After flipud: matrix_data[0, :] = y_max (위쪽) → 정상 표시
+            raw_matrix = self.extract_data(lines, N_begin, self.device_type, self.task_type)
+            self.matrix_data = np.flipud(raw_matrix)
             self.pixel_data = self.matrix_data
 
             self._set_device_parameters()
@@ -569,5 +575,8 @@ class MCCFileHandler(BaseFileHandler):
         full_grid_py = pixel_y + self.crop_pixel_offset[1]
 
         phys_x = (full_grid_px - self.mcc_origin_x) * self.mcc_spacing_x
-        phys_y = (full_grid_py - self.mcc_origin_y) * self.mcc_spacing_y
+        # Y축 음수 부호: matrix_data flipud 후 create_physical_coordinates_mcc()의 음수와 일치시킴
+        # py=0 (flipud 후 위쪽) → phys_y = -(0-26)*5 = 130 (y_max)
+        # py=26 (flipud 후 아래쪽) → phys_y = -(26-26)*5 = -130 (y_min)
+        phys_y = -(full_grid_py - self.mcc_origin_y) * self.mcc_spacing_y
         return phys_x, phys_y
