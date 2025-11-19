@@ -13,12 +13,43 @@ from matplotlib.colors import Normalize
 class MatplotlibCanvas(FigureCanvas):
     """Matplotlib 캔버스 위젯"""
     def __init__(self, parent=None, width=5, height=4, dpi=100):
+        # Use dark background style for plots
+        plt.style.use('dark_background')
+        
         self.fig = Figure(figsize=(width, height), dpi=dpi)
+        # Ensure figure background matches the UI background
+        self.fig.patch.set_facecolor('#2b2b2b')
+        
         self.axes = self.fig.add_subplot(111)
         super(MatplotlibCanvas, self).__init__(self.fig)
         self.setParent(parent)
+        
+        # Adjust layout to maximize space and ensure labels are visible
         self.fig.tight_layout()
-        self.fig.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.1)
+        self.fig.subplots_adjust(left=0.12, right=0.95, top=0.92, bottom=0.12)
+        
+        # Update rcParams for better visibility
+        self.update_plot_style()
+
+    def update_plot_style(self):
+        """Configure plot styles for dark theme"""
+        params = {
+            'axes.facecolor': '#1e1e1e',
+            'axes.edgecolor': '#888888',
+            'axes.labelcolor': '#e0e0e0',
+            'xtick.color': '#e0e0e0',
+            'ytick.color': '#e0e0e0',
+            'text.color': '#e0e0e0',
+            'font.size': 9,
+            'axes.titlesize': 10,
+            'axes.labelsize': 9,
+            'grid.color': '#444444',
+            'grid.linestyle': '--',
+            'grid.alpha': 0.5
+        }
+        self.fig.set_facecolor('#2b2b2b')
+        for key, val in params.items():
+            plt.rcParams[key] = val
 
 
 class ProfileDataTable(QTableWidget):

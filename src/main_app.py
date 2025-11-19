@@ -8,18 +8,14 @@ from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                              QSpinBox, QComboBox, QGridLayout, 
-                             QScrollArea, QGroupBox, QMessageBox)
+                             QScrollArea, QGroupBox, QMessageBox, QSplitter, QFrame)
+from PyQt5.QtCore import Qt
 from typing import Optional
-
-import sys
-import os
-from PyQt5 import QtWidgets
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QPushButton, QLabel, QSpinBox, QComboBox,
-                             QGridLayout, QScrollArea, QGroupBox)
 
 from src.data_manager import DataManager
 from src.ui_components import MatplotlibCanvas, ProfileDataTable, PlotManager
+from src.app_controller import AppController
+from src.styles import DARK_THEME_QSS
 from src.app_controller import AppController
 
 class GammaAnalysisApp(QMainWindow):
@@ -47,55 +43,74 @@ class GammaAnalysisApp(QMainWindow):
 
         # Connect UI signals to controller methods
         self.connect_signals()
+        
+        # Apply Dark Theme
+        self.setStyleSheet(DARK_THEME_QSS)
+        
+        # Connect UI signals to controller methods
+        self.connect_signals()
 
     def init_ui(self):
         """Initializes and lays out all UI components."""
         self.setWindowTitle('2D Gamma Analysis')
-        self.setGeometry(100, 100, 1000, 1000)
+        self.setGeometry(100, 100, 1400, 900) # Increased default size
                 
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        main_layout = QVBoxLayout(main_widget)
+        main_layout = QHBoxLayout(main_widget) # Main layout is Horizontal (Sidebar + Content)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
-        control_panel = QWidget()
-        control_layout = QGridLayout(control_panel)
+        # --- Left Sidebar ---
+        sidebar = QFrame()
+        sidebar.setFixedWidth(300)
+        sidebar.setStyleSheet("background-color: #252526; border-right: 1px solid #333;")
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(15, 15, 15, 15)
+        sidebar_layout.setSpacing(15)
         
-        self.load_dicom_btn = QPushButton("Load File A (Top)")
-        self.load_measurement_btn = QPushButton("Load File B (Bottom)")
-
-        file_group = QGroupBox("File")
+        # 1. File Selection
+        file_group = QGroupBox("File Selection")
         file_layout = QVBoxLayout(file_group)
+        self.load_dicom_btn = QPushButton("Load File A (Left)")
+        self.load_measurement_btn = QPushButton("Load File B (Right)")
         file_layout.addWidget(self.load_dicom_btn)
         file_layout.addWidget(self.load_measurement_btn)
         
-        self.device_label = QLabel("Device Type: Not detected")
-        self.origin_label = QLabel("Origin: Not set")
+        # 2. Device Info
         device_group = QGroupBox("Device Info")
         device_layout = QVBoxLayout(device_group)
+        self.device_label = QLabel("Device Type: Not detected")
+        self.origin_label = QLabel("Origin: Not set")
         device_layout.addWidget(self.device_label)
         device_layout.addWidget(self.origin_label)
         
+        # 3. Origin Adjustment
+        origin_group = QGroupBox("Origin Adjustment")
+        origin_layout = QGridLayout(origin_group)
         self.dicom_x_spin = QSpinBox()
         self.dicom_x_spin.setRange(-2000, 2000)
         self.dicom_y_spin = QSpinBox()
         self.dicom_y_spin.setRange(-2000, 2000)
-        origin_group = QGroupBox("Origin Adjustment")
-        origin_layout = QGridLayout(origin_group)
-        origin_layout.addWidget(QLabel("DICOM X (pixels):"), 0, 0)
+        origin_layout.addWidget(QLabel("DICOM X (px):"), 0, 0)
         origin_layout.addWidget(self.dicom_x_spin, 0, 1)
-        origin_layout.addWidget(QLabel("DICOM Y (pixels):"), 1, 0)
+        origin_layout.addWidget(QLabel("DICOM Y (px):"), 1, 0)
         origin_layout.addWidget(self.dicom_y_spin, 1, 1)
         
+        # 4. Profile Direction
+        profile_dir_group = QGroupBox("Profile Direction")
+        profile_dir_layout = QHBoxLayout(profile_dir_group)
         self.vertical_btn = QPushButton("Vertical")
         self.vertical_btn.setCheckable(True)
         self.vertical_btn.setChecked(True)
         self.horizontal_btn = QPushButton("Horizontal")
         self.horizontal_btn.setCheckable(True)
-        profile_dir_group = QGroupBox("Profile Direction")
-        profile_dir_layout = QVBoxLayout(profile_dir_group)
         profile_dir_layout.addWidget(self.vertical_btn)
         profile_dir_layout.addWidget(self.horizontal_btn)
         
+        # 5. Gamma Parameters
+        gamma_group = QGroupBox("Gamma Parameters")
+        gamma_layout = QGridLayout(gamma_group)
         self.dta_spin = QSpinBox()
         self.dta_spin.setRange(1, 10)
         self.dta_spin.setValue(3)
@@ -104,69 +119,124 @@ class GammaAnalysisApp(QMainWindow):
         self.dd_spin.setValue(3)
         self.gamma_type_combo = QComboBox()
         self.gamma_type_combo.addItems(["Global", "Local"])
-        gamma_group = QGroupBox("Gamma Analysis Parameters")
-        gamma_layout = QGridLayout(gamma_group)
         gamma_layout.addWidget(QLabel("DTA (mm):"), 0, 0)
         gamma_layout.addWidget(self.dta_spin, 0, 1)
         gamma_layout.addWidget(QLabel("DD (%):"), 1, 0)
         gamma_layout.addWidget(self.dd_spin, 1, 1)
-        gamma_layout.addWidget(QLabel("Analysis Type:"), 2, 0)
+        gamma_layout.addWidget(QLabel("Type:"), 2, 0)
         gamma_layout.addWidget(self.gamma_type_combo, 2, 1)
         
+        # 6. Execution
+        run_report_group = QGroupBox("Actions")
+        run_report_layout = QVBoxLayout(run_report_group)
         self.run_gamma_btn = QPushButton("Run Gamma Analysis")
+        self.run_gamma_btn.setStyleSheet("background-color: #007acc; font-weight: bold;") # Highlight action button
         self.generate_report_btn = QPushButton("Generate Report")
         self.generate_report_btn.setEnabled(False)
-        run_report_group = QGroupBox("Execute")
-        run_report_layout = QVBoxLayout(run_report_group)
         run_report_layout.addWidget(self.run_gamma_btn)
         run_report_layout.addWidget(self.generate_report_btn)
         
-        control_layout.addWidget(file_group, 0, 1)
-        control_layout.addWidget(device_group, 0, 2)
-        control_layout.addWidget(origin_group, 0, 3)
-        control_layout.addWidget(profile_dir_group, 0, 4)
-        control_layout.addWidget(gamma_group, 0, 5)
-        control_layout.addWidget(run_report_group, 0, 6)
+        sidebar_layout.addWidget(file_group)
+        sidebar_layout.addWidget(device_group)
+        sidebar_layout.addWidget(origin_group)
+        sidebar_layout.addWidget(profile_dir_group)
+        sidebar_layout.addWidget(gamma_group)
+        sidebar_layout.addWidget(run_report_group)
+        sidebar_layout.addStretch() # Push everything up
         
-        main_layout.addWidget(control_panel)
+        # --- Main Content Area (Right) ---
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(10, 10, 10, 10)
         
-        viz_widget = QWidget()
-        viz_layout = QGridLayout(viz_widget)
+        # Vertical Splitter: Top (Images) vs Bottom (Analysis)
+        main_splitter = QSplitter(Qt.Vertical)
+        main_splitter.setHandleWidth(8)
         
+        # Top Section: File A and File B Images
+        top_widget = QWidget()
+        top_layout = QHBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        
+        top_splitter = QSplitter(Qt.Horizontal)
+        top_splitter.setHandleWidth(8)
+        
+        # File A Container
         self.dicom_canvas = MatplotlibCanvas(self)
         self.dicom_label = QLabel("File A: None")
-        dicom_widget = QWidget()
-        QVBoxLayout(dicom_widget).addWidget(self.dicom_canvas)
-        QVBoxLayout(dicom_widget).addWidget(self.dicom_label)
-
+        self.dicom_label.setAlignment(Qt.AlignCenter)
+        dicom_container = QWidget()
+        dicom_layout = QVBoxLayout(dicom_container)
+        dicom_layout.addWidget(self.dicom_canvas)
+        dicom_layout.addWidget(self.dicom_label)
+        
+        # File B Container
         self.mcc_canvas = MatplotlibCanvas(self)
         self.mcc_label = QLabel("File B: None")
-        mcc_widget = QWidget()
-        QVBoxLayout(mcc_widget).addWidget(self.mcc_canvas)
-        QVBoxLayout(mcc_widget).addWidget(self.mcc_label)
+        self.mcc_label.setAlignment(Qt.AlignCenter)
+        mcc_container = QWidget()
+        mcc_layout = QVBoxLayout(mcc_container)
+        mcc_layout.addWidget(self.mcc_canvas)
+        mcc_layout.addWidget(self.mcc_label)
+        
+        top_splitter.addWidget(dicom_container)
+        top_splitter.addWidget(mcc_container)
+        top_layout.addWidget(top_splitter)
+        
+        # Bottom Section: Profile/Table and Gamma Map
+        bottom_widget = QWidget()
+        bottom_layout = QHBoxLayout(bottom_widget)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        
+        bottom_splitter = QSplitter(Qt.Horizontal)
+        bottom_splitter.setHandleWidth(8)
+        
+        # Profile & Table Section (Left side of bottom)
+        profile_container = QWidget()
+        profile_layout = QHBoxLayout(profile_container)
+        profile_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Splitter for Profile Plot vs Table
+        profile_inner_splitter = QSplitter(Qt.Horizontal)
         
         self.profile_canvas = MatplotlibCanvas(self)
         self.profile_table = ProfileDataTable()
         profile_scroll = QScrollArea()
         profile_scroll.setWidget(self.profile_table)
         profile_scroll.setWidgetResizable(True)
-        profile_widget = QWidget()
-        profile_layout = QHBoxLayout(profile_widget)
-        profile_layout.addWidget(self.profile_canvas, 2)
-        profile_layout.addWidget(profile_scroll, 1)
         
+        profile_inner_splitter.addWidget(self.profile_canvas)
+        profile_inner_splitter.addWidget(profile_scroll)
+        # Give more space to the table (ratio 1:1)
+        profile_inner_splitter.setStretchFactor(0, 1) 
+        profile_inner_splitter.setStretchFactor(1, 1)
+        
+        profile_layout.addWidget(profile_inner_splitter)
+        
+        # Gamma Map Section (Right side of bottom)
+        gamma_container = QWidget()
+        gamma_layout = QVBoxLayout(gamma_container)
         self.gamma_canvas = MatplotlibCanvas(self)
         self.gamma_stats_label = QLabel("Gamma Statistics: Not calculated")
-        gamma_widget = QWidget()
-        QVBoxLayout(gamma_widget).addWidget(self.gamma_canvas)
-        QVBoxLayout(gamma_widget).addWidget(self.gamma_stats_label)
+        self.gamma_stats_label.setAlignment(Qt.AlignCenter)
+        gamma_layout.addWidget(self.gamma_canvas)
+        gamma_layout.addWidget(self.gamma_stats_label)
         
-        viz_layout.addWidget(dicom_widget, 0, 0)
-        viz_layout.addWidget(profile_widget, 0, 1)
-        viz_layout.addWidget(mcc_widget, 1, 0)
-        viz_layout.addWidget(gamma_widget, 1, 1)
+        bottom_splitter.addWidget(profile_container)
+        bottom_splitter.addWidget(gamma_container)
+        bottom_layout.addWidget(bottom_splitter)
         
-        main_layout.addWidget(viz_widget)
+        # Add Top and Bottom to Main Splitter
+        main_splitter.addWidget(top_widget)
+        main_splitter.addWidget(bottom_widget)
+        main_splitter.setStretchFactor(0, 1)
+        main_splitter.setStretchFactor(1, 1)
+        
+        content_layout.addWidget(main_splitter)
+        
+        # Add Sidebar and Content to Main Layout
+        main_layout.addWidget(sidebar)
+        main_layout.addWidget(content_widget)
 
     def connect_signals(self):
         """Connects all UI widget signals to the controller's methods."""

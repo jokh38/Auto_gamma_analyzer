@@ -152,6 +152,7 @@ class AppController:
     def load_file_a(self):
         """Load File A (Top display) - supports both DCM and MCC files."""
         options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
         filename, _ = QFileDialog.getOpenFileName(
             self.main_view, "Open File A (Top)", "./",
             "All Supported Files (*.dcm *.mcc);;DICOM Files (*.dcm);;MCC Files (*.mcc);;All Files (*)",
@@ -215,6 +216,7 @@ class AppController:
     def load_file_b(self):
         """Load File B (Bottom display) - supports both DCM and MCC files."""
         options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
         filename, _ = QFileDialog.getOpenFileName(
             self.main_view, "Open File B (Bottom)", "./",
             "All Supported Files (*.dcm *.mcc);;DICOM Files (*.dcm);;MCC Files (*.mcc);;All Files (*)",
