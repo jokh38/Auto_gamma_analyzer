@@ -87,8 +87,6 @@ class AppController:
             self.plot_manager.draw_gamma_map()
 
             if 'pass_rate' in dm.gamma_stats:
-                stats_text = f"Gamma Stats: Pass = {dm.gamma_stats['pass_rate']:.2f}% | Mean = {dm.gamma_stats['mean']:.3f} | Max = {dm.gamma_stats['max']:.3f}"
-                view.gamma_stats_label.setText(stats_text)
                 view.generate_report_btn.setEnabled(True)
             else:
                 QMessageBox.warning(view, "Warning", "No valid gamma results.")

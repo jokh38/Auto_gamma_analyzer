@@ -43,12 +43,9 @@ class GammaAnalysisApp(QMainWindow):
 
         # Connect UI signals to controller methods
         self.connect_signals()
-        
+
         # Apply Dark Theme
         self.setStyleSheet(DARK_THEME_QSS)
-        
-        # Connect UI signals to controller methods
-        self.connect_signals()
 
     def init_ui(self):
         """Initializes and lays out all UI components."""
@@ -68,14 +65,6 @@ class GammaAnalysisApp(QMainWindow):
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(15, 15, 15, 15)
         sidebar_layout.setSpacing(15)
-        
-        # 1. File Selection
-        file_group = QGroupBox("File Selection")
-        file_layout = QVBoxLayout(file_group)
-        self.load_dicom_btn = QPushButton("Load File A (Left)")
-        self.load_measurement_btn = QPushButton("Load File B (Right)")
-        file_layout.addWidget(self.load_dicom_btn)
-        file_layout.addWidget(self.load_measurement_btn)
         
         # 2. Device Info
         device_group = QGroupBox("Device Info")
@@ -136,103 +125,142 @@ class GammaAnalysisApp(QMainWindow):
         run_report_layout.addWidget(self.run_gamma_btn)
         run_report_layout.addWidget(self.generate_report_btn)
         
-        sidebar_layout.addWidget(file_group)
         sidebar_layout.addWidget(device_group)
         sidebar_layout.addWidget(origin_group)
         sidebar_layout.addWidget(profile_dir_group)
         sidebar_layout.addWidget(gamma_group)
         sidebar_layout.addWidget(run_report_group)
+        
         sidebar_layout.addStretch() # Push everything up
+        
+        self.close_btn = QPushButton("Close App")
+        self.close_btn.setObjectName("closeBtn")
+        sidebar_layout.addWidget(self.close_btn)
         
         # --- Main Content Area (Right) ---
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(10, 10, 10, 10)
         
-        # Vertical Splitter: Top (Images) vs Bottom (Analysis)
-        main_splitter = QSplitter(Qt.Vertical)
-        main_splitter.setHandleWidth(8)
+        # --- Main Layout Strategy: 3 Columns ---
+        # Col 1: File A (Top) / Profile (Bottom)
+        # Col 2: File B (Top) / Gamma (Bottom)
+        # Col 3: Profile Table (Spans full height)
         
-        # Top Section: File A and File B Images
-        top_widget = QWidget()
-        top_layout = QHBoxLayout(top_widget)
-        top_layout.setContentsMargins(0, 0, 0, 0)
+        main_h_splitter = QSplitter(Qt.Horizontal)
+        main_h_splitter.setHandleWidth(8)
         
-        top_splitter = QSplitter(Qt.Horizontal)
-        top_splitter.setHandleWidth(8)
+        # --- Column 1: File A & Profile ---
+        col1_splitter = QSplitter(Qt.Vertical)
+        col1_splitter.setHandleWidth(8)
         
-        # File A Container
+        # File A Container (Top)
         self.dicom_canvas = MatplotlibCanvas(self)
+        dicom_header_layout = QHBoxLayout()
+        self.load_dicom_btn = QPushButton("Load File A")
+        self.load_dicom_btn.setObjectName("loadBtn")
         self.dicom_label = QLabel("File A: None")
-        self.dicom_label.setAlignment(Qt.AlignCenter)
+        self.dicom_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        dicom_header_layout.addWidget(self.load_dicom_btn)
+        dicom_header_layout.addWidget(self.dicom_label)
+        dicom_header_layout.addStretch()
+        
         dicom_container = QWidget()
         dicom_layout = QVBoxLayout(dicom_container)
+        dicom_layout.addLayout(dicom_header_layout)
         dicom_layout.addWidget(self.dicom_canvas)
-        dicom_layout.addWidget(self.dicom_label)
         
-        # File B Container
-        self.mcc_canvas = MatplotlibCanvas(self)
-        self.mcc_label = QLabel("File B: None")
-        self.mcc_label.setAlignment(Qt.AlignCenter)
-        mcc_container = QWidget()
-        mcc_layout = QVBoxLayout(mcc_container)
-        mcc_layout.addWidget(self.mcc_canvas)
-        mcc_layout.addWidget(self.mcc_label)
-        
-        top_splitter.addWidget(dicom_container)
-        top_splitter.addWidget(mcc_container)
-        top_layout.addWidget(top_splitter)
-        
-        # Bottom Section: Profile/Table and Gamma Map
-        bottom_widget = QWidget()
-        bottom_layout = QHBoxLayout(bottom_widget)
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        
-        bottom_splitter = QSplitter(Qt.Horizontal)
-        bottom_splitter.setHandleWidth(8)
-        
-        # Profile & Table Section (Left side of bottom)
+        # Profile Container (Bottom)
         profile_container = QWidget()
-        profile_layout = QHBoxLayout(profile_container)
-        profile_layout.setContentsMargins(0, 0, 0, 0)
+        profile_layout = QVBoxLayout(profile_container)
         
-        # Splitter for Profile Plot vs Table
-        profile_inner_splitter = QSplitter(Qt.Horizontal)
+        profile_header_layout = QHBoxLayout()
+        profile_title = QLabel("Profile Plot")
+        profile_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        profile_title.setMinimumHeight(28) # rough equivalent of top button height
+        profile_header_layout.addWidget(profile_title)
+        profile_header_layout.addStretch()
         
         self.profile_canvas = MatplotlibCanvas(self)
+        profile_layout.addLayout(profile_header_layout)
+        profile_layout.addWidget(self.profile_canvas)
+        
+        
+        # We need to defer adding mcc_container or profile_container to col1/col2 splitters
+        # until they are defined.
+        
+        # --- Column 2: File B & Gamma Map ---
+        col2_splitter = QSplitter(Qt.Vertical)
+        col2_splitter.setHandleWidth(8)
+        
+        # File B Container (Top)
+        self.mcc_canvas = MatplotlibCanvas(self)
+        mcc_header_layout = QHBoxLayout()
+        self.load_measurement_btn = QPushButton("Load File B")
+        self.load_measurement_btn.setObjectName("loadBtn")
+        self.mcc_label = QLabel("File B: None")
+        self.mcc_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        mcc_header_layout.addWidget(self.load_measurement_btn)
+        mcc_header_layout.addWidget(self.mcc_label)
+        mcc_header_layout.addStretch()
+        
+        mcc_container = QWidget()
+        mcc_layout = QVBoxLayout(mcc_container)
+        mcc_layout.addLayout(mcc_header_layout)
+        mcc_layout.addWidget(self.mcc_canvas)
+        
+        # Gamma Map Container (Bottom)
+        gamma_container = QWidget()
+        gamma_layout = QVBoxLayout(gamma_container)
+        
+        gamma_header_layout = QHBoxLayout()
+        gamma_title = QLabel("Gamma Analysis")
+        gamma_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        gamma_title.setMinimumHeight(28) # rough equivalent of top button height
+        gamma_header_layout.addWidget(gamma_title)
+        gamma_header_layout.addStretch()
+        
+        self.gamma_canvas = MatplotlibCanvas(self)
+        gamma_layout.addLayout(gamma_header_layout)
+        gamma_layout.addWidget(self.gamma_canvas)
+        
+        col1_splitter.addWidget(dicom_container)
+        col1_splitter.addWidget(mcc_container)
+        col1_splitter.setStretchFactor(0, 1)
+        col1_splitter.setStretchFactor(1, 1)
+        
+        col2_splitter.addWidget(profile_container)
+        col2_splitter.addWidget(gamma_container)
+        col2_splitter.setStretchFactor(0, 1)
+        col2_splitter.setStretchFactor(1, 1)
+        
+        # Synchronize vertical splitters for Col 1 and Col 2
+        col1_splitter.splitterMoved.connect(
+            lambda pos, index: col2_splitter.moveSplitter(pos, index))
+        col2_splitter.splitterMoved.connect(
+            lambda pos, index: col1_splitter.moveSplitter(pos, index))
+            
+        # --- Column 3: Profile Table ---
         self.profile_table = ProfileDataTable()
         profile_scroll = QScrollArea()
         profile_scroll.setWidget(self.profile_table)
         profile_scroll.setWidgetResizable(True)
+        # Define a minimum width so it isn't completely squished
+        profile_scroll.setMinimumWidth(250)
         
-        profile_inner_splitter.addWidget(self.profile_canvas)
-        profile_inner_splitter.addWidget(profile_scroll)
-        # Give more space to the table (ratio 1:1)
-        profile_inner_splitter.setStretchFactor(0, 1) 
-        profile_inner_splitter.setStretchFactor(1, 1)
+        # Add Columns to Main Horizontal Splitter
+        main_h_splitter.addWidget(col1_splitter)
+        main_h_splitter.addWidget(col2_splitter)
+        main_h_splitter.addWidget(profile_scroll)
         
-        profile_layout.addWidget(profile_inner_splitter)
+        # Ratios (e.g. 2:2:1 width allocation)
+        main_h_splitter.setStretchFactor(0, 2)
+        main_h_splitter.setStretchFactor(1, 2)
+        main_h_splitter.setStretchFactor(2, 1)
+        # Force default widths to be perfectly equal for Col 1 and Col 2
+        main_h_splitter.setSizes([1000, 1000, 500])
         
-        # Gamma Map Section (Right side of bottom)
-        gamma_container = QWidget()
-        gamma_layout = QVBoxLayout(gamma_container)
-        self.gamma_canvas = MatplotlibCanvas(self)
-        self.gamma_stats_label = QLabel("Gamma Statistics: Not calculated")
-        self.gamma_stats_label.setAlignment(Qt.AlignCenter)
-        gamma_layout.addWidget(self.gamma_canvas)
-        gamma_layout.addWidget(self.gamma_stats_label)
-        
-        bottom_splitter.addWidget(profile_container)
-        bottom_splitter.addWidget(gamma_container)
-        bottom_layout.addWidget(bottom_splitter)
-        
-        # Add Top and Bottom to Main Splitter
-        main_splitter.addWidget(top_widget)
-        main_splitter.addWidget(bottom_widget)
-        main_splitter.setStretchFactor(0, 1)
-        main_splitter.setStretchFactor(1, 1)
-        
-        content_layout.addWidget(main_splitter)
+        content_layout.addWidget(main_h_splitter)
         
         # Add Sidebar and Content to Main Layout
         main_layout.addWidget(sidebar)
@@ -244,6 +272,7 @@ class GammaAnalysisApp(QMainWindow):
         self.load_measurement_btn.clicked.connect(self.controller.load_measurement_file)
         self.run_gamma_btn.clicked.connect(self.controller.run_gamma_analysis)
         self.generate_report_btn.clicked.connect(self.controller.generate_report)
+        self.close_btn.clicked.connect(self.close)
         
         self.dicom_x_spin.valueChanged.connect(self.controller.update_origin)
         self.dicom_y_spin.valueChanged.connect(self.controller.update_origin)

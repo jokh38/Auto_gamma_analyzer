@@ -65,6 +65,42 @@ QPushButton:disabled {
     border-color: #333;
 }
 
+/* Specific Buttons */
+QPushButton#loadBtn {
+    background-color: #2a3d4a;
+    border: 1px solid #4fa3d1;
+    color: #81c9ff;
+    font-weight: bold;
+    min-height: 20px;
+}
+
+QPushButton#loadBtn:hover {
+    background-color: #354a5a;
+    border-color: #6ebbf5;
+}
+
+QPushButton#loadBtn:pressed {
+    background-color: #1f2c36;
+}
+
+QPushButton#closeBtn {
+    background-color: #3c2a2a;
+    border: 1px solid #a34f4f;
+    color: #ff8181;
+    font-weight: bold;
+    padding: 8px 12px;
+}
+
+QPushButton#closeBtn:hover {
+    background-color: #5a3535;
+    border-color: #f56e6e;
+    color: #ffffff;
+}
+
+QPushButton#closeBtn:pressed {
+    background-color: #2c1f1f;
+}
+
 /* Inputs */
 QSpinBox, QDoubleSpinBox, QComboBox {
     background-color: #1e1e1e;
