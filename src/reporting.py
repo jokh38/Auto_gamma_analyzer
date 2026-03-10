@@ -67,15 +67,15 @@ def generate_report(
 
     # Line 1: Main title
     title_ax.text(0.5, 0.85, '2D Gamma Report',
-                 ha='center', va='top', fontsize=22, weight='bold')
+                 ha='center', va='top', fontsize=26, weight='bold')
 
     # Line 2: Patient info
     title_ax.text(0.5, 0.50, f'Patient: {patient_id} / {patient_name}',
-                 ha='center', va='center', fontsize=18, weight='bold')
+                 ha='center', va='center', fontsize=20, weight='bold')
 
     # Line 3: Institution
     title_ax.text(0.5, 0.15, f'Institution: {institution}',
-                 ha='center', va='bottom', fontsize=16)
+                 ha='center', va='bottom', fontsize=18)
 
     # 1. 2D Dose Plots
     # DICOM Dose
@@ -85,9 +85,10 @@ def generate_report(
     if dicom_data is not None and dicom_extent is not None:
         im_dicom = ax_dicom.imshow(dicom_data, cmap='jet', extent=dicom_extent, aspect='equal', origin='upper')
         cbar_dicom = fig.colorbar(im_dicom, ax=ax_dicom, label='Dose (Gy)', orientation='vertical', pad=0.02)
-    ax_dicom.set_title('DICOM RT Dose', fontsize=12, weight='bold')
-    ax_dicom.set_xlabel('Position (mm)', fontsize=10)
-    ax_dicom.set_ylabel('Position (mm)', fontsize=10)
+    ax_dicom.set_title('DICOM RT Dose', fontsize=14, weight='bold')
+    ax_dicom.set_xlabel('Position (mm)', fontsize=12)
+    ax_dicom.set_ylabel('Position (mm)', fontsize=12)
+    ax_dicom.tick_params(labelsize=10)
 
     # MCC Dose
     ax_mcc = fig.add_subplot(gs[1, 1])
@@ -96,41 +97,42 @@ def generate_report(
         im_mcc = ax_mcc.imshow(mcc_interp_data, cmap='jet', extent=dicom_extent, aspect='equal', origin='upper')
         cbar_mcc = fig.colorbar(im_mcc, ax=ax_mcc, label='Dose (Gy)', orientation='vertical', pad=0.02)
 
-    ax_mcc.set_title('MCC Dose (Interpolated)', fontsize=12, weight='bold')
-    ax_mcc.set_xlabel('Position (mm)', fontsize=10)
-    ax_mcc.set_ylabel('Position (mm)', fontsize=10)
+    ax_mcc.set_title('MCC Dose (Interpolated)', fontsize=14, weight='bold')
+    ax_mcc.set_xlabel('Position (mm)', fontsize=12)
+    ax_mcc.set_ylabel('Position (mm)', fontsize=12)
+    ax_mcc.tick_params(labelsize=10)
 
 
     # 2. Profile Plots
     # Horizontal Profile
     ax_hor_profile = fig.add_subplot(gs[2, 0])
     if hor_profile_data:
+        ax_hor_profile.fill_between(hor_profile_data['phys_coords'], hor_profile_data['dicom_values'], color='blue', alpha=0.1)
         ax_hor_profile.plot(hor_profile_data['phys_coords'], hor_profile_data['dicom_values'], 'b-', linewidth=2, label='RT dose')
-        if 'mcc_interp' in hor_profile_data:
-            ax_hor_profile.plot(hor_profile_data['phys_coords'], hor_profile_data['mcc_interp'], 'r--', linewidth=2, label='mcc dose')
         if 'mcc_values' in hor_profile_data and 'mcc_phys_coords' in hor_profile_data:
-            ax_hor_profile.plot(hor_profile_data['mcc_phys_coords'], hor_profile_data['mcc_values'], 'ro', markersize=8)
+            ax_hor_profile.plot(hor_profile_data['mcc_phys_coords'], hor_profile_data['mcc_values'], 'ro', markersize=6, alpha=0.7)
 
-        ax_hor_profile.set_xlabel('Position (mm)', fontsize=10)
-        ax_hor_profile.set_ylabel('Dose (Gy)', fontsize=10)
-        ax_hor_profile.set_title('Left-Right Profile (Horizontal)', fontsize=12, weight='bold')
-        ax_hor_profile.legend()
-        ax_hor_profile.grid(True)
+        ax_hor_profile.set_xlabel('Position (mm)', fontsize=12)
+        ax_hor_profile.set_ylabel('Dose (Gy)', fontsize=12)
+        ax_hor_profile.set_title('Left-Right Profile (Horizontal)', fontsize=14, weight='bold')
+        ax_hor_profile.tick_params(labelsize=10)
+        ax_hor_profile.legend(fontsize=10)
+        ax_hor_profile.grid(False)
 
     # Vertical Profile
     ax_ver_profile = fig.add_subplot(gs[2, 1])
     if ver_profile_data:
+        ax_ver_profile.fill_between(ver_profile_data['phys_coords'], ver_profile_data['dicom_values'], color='blue', alpha=0.1)
         ax_ver_profile.plot(ver_profile_data['phys_coords'], ver_profile_data['dicom_values'], 'b-', linewidth=2, label='RT dose')
-        if 'mcc_interp' in ver_profile_data:
-            ax_ver_profile.plot(ver_profile_data['phys_coords'], ver_profile_data['mcc_interp'], 'r--', linewidth=2, label='mcc dose')
         if 'mcc_values' in ver_profile_data and 'mcc_phys_coords' in ver_profile_data:
-            ax_ver_profile.plot(ver_profile_data['mcc_phys_coords'], ver_profile_data['mcc_values'], 'ro', markersize=8)
+            ax_ver_profile.plot(ver_profile_data['mcc_phys_coords'], ver_profile_data['mcc_values'], 'ro', markersize=6, alpha=0.7)
 
-        ax_ver_profile.set_xlabel('Position (mm)', fontsize=10)
-        ax_ver_profile.set_ylabel('Dose (Gy)', fontsize=10)
-        ax_ver_profile.set_title('In-Out Profile (Vertical)', fontsize=12, weight='bold')
-        ax_ver_profile.legend()
-        ax_ver_profile.grid(True)
+        ax_ver_profile.set_xlabel('Position (mm)', fontsize=12)
+        ax_ver_profile.set_ylabel('Dose (Gy)', fontsize=12)
+        ax_ver_profile.set_title('In-Out Profile (Vertical)', fontsize=14, weight='bold')
+        ax_ver_profile.tick_params(labelsize=10)
+        ax_ver_profile.legend(fontsize=10)
+        ax_ver_profile.grid(False)
 
     # 3. Gamma Analysis
     # Gamma Map - Use interpolated version if available for gap-free visualization
@@ -138,17 +140,23 @@ def generate_report(
     if gamma_map_interp is not None and dicom_extent is not None:
         # Use interpolated gamma map on DICOM grid (no gaps)
         im_gamma = ax_gamma.imshow(gamma_map_interp, cmap='coolwarm', extent=dicom_extent, vmin=0, vmax=2, aspect='equal', origin='upper', interpolation='bilinear')
-        cbar_gamma = fig.colorbar(im_gamma, ax=ax_gamma, label='Gamma Index', orientation='vertical', pad=0.02)
+        cbar_gamma = fig.colorbar(im_gamma, ax=ax_gamma, label='Gamma Index', orientation='vertical', pad=0.02, extend='max')
+        
+        # Add contour at gamma = 1.0
+        X = np.linspace(dicom_extent[0], dicom_extent[1], gamma_map_interp.shape[1])
+        Y = np.linspace(dicom_extent[3], dicom_extent[2], gamma_map_interp.shape[0])  # Match origin='upper'
+        ax_gamma.contour(X, Y, gamma_map_interp, levels=[1.0], colors='black', linewidths=1.5, linestyles='solid', alpha=0.8)
     elif gamma_map is not None:
         # Fallback to sparse gamma map on MCC grid
         mcc_extent = mcc_handler.get_physical_extent()
         if mcc_extent is not None:
             im_gamma = ax_gamma.imshow(gamma_map, cmap='coolwarm', extent=mcc_extent, vmin=0, vmax=2, aspect='equal', origin='upper')
-            cbar_gamma = fig.colorbar(im_gamma, ax=ax_gamma, label='Gamma Index', orientation='vertical', pad=0.02)
+            cbar_gamma = fig.colorbar(im_gamma, ax=ax_gamma, label='Gamma Index', orientation='vertical', pad=0.02, extend='max')
 
-    ax_gamma.set_title(f'Gamma Analysis', fontsize=12, weight='bold')
-    ax_gamma.set_xlabel('Position (mm)', fontsize=10)
-    ax_gamma.set_ylabel('Position (mm)', fontsize=10)
+    ax_gamma.set_title(f'Gamma Analysis', fontsize=14, weight='bold')
+    ax_gamma.set_xlabel('Position (mm)', fontsize=12)
+    ax_gamma.set_ylabel('Position (mm)', fontsize=12)
+    ax_gamma.tick_params(labelsize=10)
 
     # Results Panel - Two-column layout
     ax_results = fig.add_subplot(gs[1, 3])
@@ -167,24 +175,31 @@ def generate_report(
         f" •Threshold: {suppression_level}%"
     )
 
-    ax_results.text(0.02, 0.98, gamma_text, transform=ax_results.transAxes, fontsize=10,
+    ax_results.text(0.02, 0.98, gamma_text, transform=ax_results.transAxes, fontsize=13,
                    verticalalignment='top', family='monospace',
-                   bbox=dict(boxstyle='round,pad=0.6', fc='aliceblue', alpha=0.85,
-                            edgecolor='steelblue', linewidth=1.5))
+                   bbox=dict(boxstyle='round,pad=0.6', fc='#f0f8ff', alpha=0.9,
+                            edgecolor='#4682b4', linewidth=1.5))
 
-    # Left Panel: Gamma Analysis
+    # Left Panel: Gamma Analysis Box - Color Code Based on Pass Rate
+    if pass_rate >= 95.0:
+        res_fc, res_ec = '#eaffea', '#2ca02c' # Greenish
+    elif pass_rate >= 90.0:
+        res_fc, res_ec = '#fffae6', '#ff7f0e' # Yellow/Orange
+    else:
+        res_fc, res_ec = '#ffeaea', '#d62728' # Redish
+
     gamma_text = (
         f"═ γ Analysis ═\n\n"
-        f" ►Result:{pass_rate:.2f}%\n\n"
+        f" ►Result:{pass_rate:>6.2f}%\n\n"
         f" •Analyzed: {total_points:,}\n"
         f"  •Passed: {passed_points:,}\n"
         f"  •Failed: {failed_points:,}"
     )
 
-    ax_results.text(0.02, 0.4, gamma_text, transform=ax_results.transAxes, fontsize=13,
-                   verticalalignment='top', family='monospace',
-                   bbox=dict(boxstyle='round,pad=0.6', fc='lightyellow', alpha=0.85,
-                             edgecolor='orange', linewidth=1.5))
+    ax_results.text(0.02, 0.55, gamma_text, transform=ax_results.transAxes, fontsize=15,
+                   verticalalignment='top', family='monospace', weight='bold',
+                   bbox=dict(boxstyle='round,pad=0.6', fc=res_fc, alpha=0.9,
+                             edgecolor=res_ec, linewidth=2.0))
 
     # Right Panel: DD & DTA Analysis
     dd_dta_text = ""
@@ -209,10 +224,10 @@ def generate_report(
         )
 
     if dd_dta_text:
-        ax_results.text(0.52, 0.98, dd_dta_text, transform=ax_results.transAxes, fontsize=10,
+        ax_results.text(0.52, 0.98, dd_dta_text, transform=ax_results.transAxes, fontsize=12,
                        verticalalignment='top', family='monospace',
-                       bbox=dict(boxstyle='round,pad=0.6', fc='aliceblue', alpha=0.85,
-                                 edgecolor='steelblue', linewidth=1.5))
+                       bbox=dict(boxstyle='round,pad=0.6', fc='#f0f8ff', alpha=0.9,
+                                 edgecolor='#4682b4', linewidth=1.5))
 
     # 4. DD and DTA Analysis - Use interpolated versions if available for gap-free visualization
     if dd_map_interp is not None or dd_map is not None:
@@ -221,17 +236,18 @@ def generate_report(
         if dd_map_interp is not None and dicom_extent is not None:
             # Use interpolated DD map on DICOM grid (no gaps)
             im_dd = ax_dd.imshow(dd_map_interp, cmap='viridis', extent=dicom_extent, aspect='equal', origin='upper', interpolation='bilinear')
-            cbar_dd = fig.colorbar(im_dd, ax=ax_dd, label='DD (%)', orientation='vertical', pad=0.02)
+            cbar_dd = fig.colorbar(im_dd, ax=ax_dd, label='DD (%)', orientation='vertical', pad=0.02, extend='both')
         elif dd_map is not None:
             # Fallback to sparse DD map on MCC grid
             mcc_extent = mcc_handler.get_physical_extent()
             if mcc_extent is not None:
                 im_dd = ax_dd.imshow(dd_map, cmap='viridis', extent=mcc_extent, aspect='equal', origin='upper')
-                cbar_dd = fig.colorbar(im_dd, ax=ax_dd, label='DD (%)', orientation='vertical', pad=0.02)
+                cbar_dd = fig.colorbar(im_dd, ax=ax_dd, label='DD (%)', orientation='vertical', pad=0.02, extend='both')
 
-        ax_dd.set_title(f'Dose Difference (DD) Map', fontsize=12, weight='bold')
-        ax_dd.set_xlabel('Position (mm)', fontsize=10)
-        ax_dd.set_ylabel('Position (mm)', fontsize=10)
+        ax_dd.set_title(f'Dose Difference (DD) Map', fontsize=14, weight='bold')
+        ax_dd.set_xlabel('Position (mm)', fontsize=12)
+        ax_dd.set_ylabel('Position (mm)', fontsize=12)
+        ax_dd.tick_params(labelsize=10)
 
     if dta_map_interp is not None or dta_map is not None:
         # DTA Map (Distance to Agreement)
@@ -239,18 +255,19 @@ def generate_report(
         if dta_map_interp is not None and dicom_extent is not None:
             # Use interpolated DTA map on DICOM grid (no gaps)
             im_dta = ax_dta.imshow(dta_map_interp, cmap='plasma', extent=dicom_extent, aspect='equal', origin='upper', interpolation='bilinear')
-            cbar_dta = fig.colorbar(im_dta, ax=ax_dta, label='DTA (mm)', orientation='vertical', pad=0.02)
+            cbar_dta = fig.colorbar(im_dta, ax=ax_dta, label='DTA (mm)', orientation='vertical', pad=0.02, extend='max')
         elif dta_map is not None:
             # Fallback to sparse DTA map on MCC grid
             mcc_extent = mcc_handler.get_physical_extent()
             if mcc_extent is not None:
                 im_dta = ax_dta.imshow(dta_map, cmap='plasma', extent=mcc_extent, aspect='equal', origin='upper')
-                cbar_dta = fig.colorbar(im_dta, ax=ax_dta, label='DTA (mm)', orientation='vertical', pad=0.02)
+                cbar_dta = fig.colorbar(im_dta, ax=ax_dta, label='DTA (mm)', orientation='vertical', pad=0.02, extend='max')
 
-        ax_dta.set_title(f'Distance to Agreement (DTA) Map', fontsize=12, weight='bold')
-        ax_dta.set_xlabel('Position (mm)', fontsize=10)
-        ax_dta.set_ylabel('Position (mm)', fontsize=10)
+        ax_dta.set_title(f'Distance to Agreement (DTA) Map', fontsize=14, weight='bold')
+        ax_dta.set_xlabel('Position (mm)', fontsize=12)
+        ax_dta.set_ylabel('Position (mm)', fontsize=12)
+        ax_dta.tick_params(labelsize=10)
 
     plt.tight_layout(rect=(0, 0, 1, 0.96), pad=2.0, w_pad=2.5, h_pad=2.5)
-    plt.savefig(output_path, format='jpeg', dpi=150)
+    plt.savefig(output_path, format='jpeg', dpi=300)
     plt.close(fig)

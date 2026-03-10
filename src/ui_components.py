@@ -1,6 +1,5 @@
 import numpy as np
-from scipy.interpolate import interpn
-from scipy.interpolate import interpn
+from scipy.interpolate import griddata, interpn
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
@@ -134,6 +133,7 @@ def draw_image(canvas, image_data, extent, title, colorbar_label=None,
 
 from src.data_manager import DataManager
 from src.analysis import extract_profile_data
+from src.file_handlers import MCCFileHandler
 
 class PlotManager:
     """
@@ -150,6 +150,38 @@ class PlotManager:
         self.gamma_canvas = gamma_canvas
         self.profile_table = profile_table
         self.profile_y_max = None  # Store max dose for consistent Y-axis scaling
+
+    def _get_interpolated_file_b_data(self):
+        """Interpolate File B onto File A's grid for display when File B is MCC."""
+        dm = self.data_manager
+        if not dm.file_a_handler or not dm.file_b_handler:
+            return None, None
+
+        if not isinstance(dm.file_b_handler, MCCFileHandler):
+            return None, None
+
+        if dm.mcc_interp_data is not None:
+            return dm.mcc_interp_data, dm.file_a_handler.get_physical_extent()
+
+        if not hasattr(dm.file_a_handler, 'phys_x_mesh') or not hasattr(dm.file_a_handler, 'phys_y_mesh'):
+            return None, None
+
+        mcc_data = dm.file_b_handler.get_pixel_data()
+        if mcc_data is None:
+            return None, None
+
+        valid_mask = mcc_data >= 0
+        if not np.any(valid_mask):
+            return None, None
+
+        interp_data = griddata(
+            (dm.file_b_handler.phys_x_mesh[valid_mask], dm.file_b_handler.phys_y_mesh[valid_mask]),
+            mcc_data[valid_mask],
+            (dm.file_a_handler.phys_x_mesh, dm.file_a_handler.phys_y_mesh),
+            method='linear',
+            fill_value=0
+        )
+        return interp_data, dm.file_a_handler.get_physical_extent()
  
     def generate_profile_data(self) -> dict | None:
         """
@@ -203,9 +235,14 @@ class PlotManager:
 
             self.profile_canvas.axes.plot(phys_coords, dicom_values, 'b-', label='A')
 
-            if 'mcc_interp' in profile_data:
-                self.profile_canvas.axes.plot(phys_coords, profile_data['mcc_interp'], 'r-', label='B (interpolated)')
-                self.profile_canvas.axes.plot(profile_data['mcc_phys_coords'], profile_data['mcc_values'], 'ro', label='B (original)', markersize=5)
+            if 'mcc_values' in profile_data and 'mcc_phys_coords' in profile_data:
+                self.profile_canvas.axes.plot(
+                    profile_data['mcc_phys_coords'],
+                    profile_data['mcc_values'],
+                    'ro',
+                    label='B',
+                    markersize=5
+                )
 
             fixed_pos = self.data_manager.profile_line["x"] if self.data_manager.profile_line["type"] == "vertical" else self.data_manager.profile_line["y"]
             x_label = "Y Position (mm)" if profile_direction == "vertical" else "X Position (mm)"
@@ -253,7 +290,7 @@ class PlotManager:
                 self.profile_canvas.axes.set_ylim([0, self.profile_y_max * 1.1])
 
             self.profile_canvas.axes.legend()
-            self.profile_canvas.axes.grid(True)
+            self.profile_canvas.axes.grid(False)
             self.profile_canvas.fig.tight_layout()
             self.profile_canvas.draw()
 
@@ -297,13 +334,15 @@ class PlotManager:
 
         # Draw File B (bottom)
         if dm.file_b_handler:
-            # Use mcc_interp_data if available (same resolution as DICOM/report)
-            if dm.use_mcc_interpolation and dm.mcc_interp_data is not None:
-                file_b_data = dm.mcc_interp_data
-                # Use DICOM extent since mcc_interp_data is on DICOM grid
-                file_b_extent = dm.file_a_handler.get_physical_extent() if dm.file_a_handler else dm.file_b_handler.get_physical_extent()
+            # Use interpolated MCC data to match the report view whenever possible.
+            if dm.use_mcc_interpolation:
+                file_b_data, file_b_extent = self._get_interpolated_file_b_data()
                 title_suffix = ' (Interpolated)'
             else:
+                file_b_data, file_b_extent = None, None
+                title_suffix = ''
+
+            if file_b_data is None or file_b_extent is None:
                 file_b_data = dm.file_b_handler.get_pixel_data()
                 file_b_extent = dm.file_b_handler.get_physical_extent()
                 title_suffix = ''
