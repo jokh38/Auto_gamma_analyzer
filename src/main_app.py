@@ -8,7 +8,8 @@ from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                              QSpinBox, QComboBox, QGridLayout, 
-                             QScrollArea, QGroupBox, QMessageBox, QSplitter, QFrame)
+                             QScrollArea, QGroupBox, QMessageBox, QSplitter, QFrame,
+                             QSizePolicy)
 from PyQt5.QtCore import Qt
 from typing import Optional
 
@@ -147,8 +148,8 @@ class GammaAnalysisApp(QMainWindow):
         # Col 2: File B (Top) / Gamma (Bottom)
         # Col 3: Profile Table (Spans full height)
         
-        main_h_splitter = QSplitter(Qt.Horizontal)
-        main_h_splitter.setHandleWidth(8)
+        self.main_h_splitter = QSplitter(Qt.Horizontal)
+        self.main_h_splitter.setHandleWidth(8)
         
         # --- Column 1: File A & Profile ---
         col1_splitter = QSplitter(Qt.Vertical)
@@ -161,6 +162,7 @@ class GammaAnalysisApp(QMainWindow):
         self.load_dicom_btn.setObjectName("loadBtn")
         self.dicom_label = QLabel("File A: None")
         self.dicom_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.dicom_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         dicom_header_layout.addWidget(self.load_dicom_btn)
         dicom_header_layout.addWidget(self.dicom_label)
         dicom_header_layout.addStretch()
@@ -200,6 +202,7 @@ class GammaAnalysisApp(QMainWindow):
         self.load_measurement_btn.setObjectName("loadBtn")
         self.mcc_label = QLabel("File B: None")
         self.mcc_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.mcc_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         mcc_header_layout.addWidget(self.load_measurement_btn)
         mcc_header_layout.addWidget(self.mcc_label)
         mcc_header_layout.addStretch()
@@ -249,18 +252,19 @@ class GammaAnalysisApp(QMainWindow):
         profile_scroll.setMinimumWidth(250)
         
         # Add Columns to Main Horizontal Splitter
-        main_h_splitter.addWidget(col1_splitter)
-        main_h_splitter.addWidget(col2_splitter)
-        main_h_splitter.addWidget(profile_scroll)
+        self.main_h_splitter.addWidget(col1_splitter)
+        self.main_h_splitter.addWidget(col2_splitter)
+        self.main_h_splitter.addWidget(profile_scroll)
         
         # Ratios (e.g. 2:2:1 width allocation)
-        main_h_splitter.setStretchFactor(0, 2)
-        main_h_splitter.setStretchFactor(1, 2)
-        main_h_splitter.setStretchFactor(2, 1)
+        self.main_h_splitter.setStretchFactor(0, 2)
+        self.main_h_splitter.setStretchFactor(1, 2)
+        self.main_h_splitter.setStretchFactor(2, 1)
+        self.main_h_splitter.setChildrenCollapsible(False)
         # Force default widths to be perfectly equal for Col 1 and Col 2
-        main_h_splitter.setSizes([1000, 1000, 500])
+        self.main_h_splitter.setSizes([1000, 1000, 500])
         
-        content_layout.addWidget(main_h_splitter)
+        content_layout.addWidget(self.main_h_splitter)
         
         # Add Sidebar and Content to Main Layout
         main_layout.addWidget(sidebar)

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from PyQt5.QtCore import Qt
 
 from src.data_manager import DataManager
 from src.ui_components import PlotManager
@@ -22,6 +23,13 @@ class AppController:
         self.main_view = main_view
         self.data_manager = data_manager
         self.plot_manager = plot_manager
+
+    def _set_file_label(self, label_widget, prefix, filename):
+        """Keep file labels from changing splitter widths when long names are loaded."""
+        metrics = label_widget.fontMetrics()
+        available_width = max(label_widget.width(), 220)
+        elided_name = metrics.elidedText(filename, Qt.ElideRight, available_width)
+        label_widget.setText(f"{prefix}: {elided_name}")
 
     def run_gamma_analysis(self):
         """
@@ -194,7 +202,11 @@ class AppController:
                 self.main_view.origin_label.setText(f"Origin: ({pos_x:.2f}, {pos_y:.2f}) mm")
 
             self.plot_manager.redraw_all_images()
-            self.main_view.dicom_label.setText(f"File A ({file_type}): {os.path.basename(filename)}")
+            self._set_file_label(
+                self.main_view.dicom_label,
+                f"File A ({file_type})",
+                os.path.basename(filename)
+            )
 
             if isinstance(handler, MCCFileHandler):
                 self.main_view.device_label.setText(f"Device Type: {handler.get_device_name()}")
@@ -256,7 +268,11 @@ class AppController:
                 self.main_view.device_label.setText(f"Device Type: {handler.get_device_name()}")
 
             self.plot_manager.redraw_all_images()
-            self.main_view.mcc_label.setText(f"File B ({file_type}): {os.path.basename(filename)}")
+            self._set_file_label(
+                self.main_view.mcc_label,
+                f"File B ({file_type})",
+                os.path.basename(filename)
+            )
 
             # Auto-generate profile if both files are loaded
             if self.data_manager.file_a_handler is not None:
