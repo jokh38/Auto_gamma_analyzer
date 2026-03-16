@@ -10,6 +10,19 @@ from src.utils import logger, find_nearest_index, save_map_to_csv
 import os
 import yaml
 
+def _get_handler_grid(handler):
+    """Returns the handler's native data grid and its valid-data mask."""
+    if hasattr(handler, 'get_matrix_data'):
+        matrix_data = handler.get_matrix_data()
+        if matrix_data is not None:
+            return matrix_data, np.isfinite(matrix_data) & (matrix_data >= 0)
+
+    pixel_data = handler.get_pixel_data()
+    if pixel_data is None:
+        return None, None
+
+    return pixel_data, np.isfinite(pixel_data)
+
 def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=None):
     """
     Extracts profile data from DICOM and MCC datasets.
@@ -71,14 +84,17 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
         profile_data['phys_coords'] = profile_coords_dicom
         profile_data['dicom_values'] = dicom_values
 
-        # 2. Process MCC data if available
-        if mcc_handler and mcc_handler.get_matrix_data() is not None:
-            mcc_image = mcc_handler.get_matrix_data()
+        # 2. Process File B data if available
+        if mcc_handler:
+            mcc_image, valid_mask = _get_handler_grid(mcc_handler)
+            if mcc_image is None:
+                return profile_data
 
             closest_idx_mcc = find_nearest_index(mcc_fixed_axis_coords, fixed_position)
             mcc_line_values = mcc_image[slicer_mcc(closest_idx_mcc)]
+            valid_line = valid_mask[slicer_mcc(closest_idx_mcc)]
 
-            valid_indices = np.where(mcc_line_values >= 0)[0]
+            valid_indices = np.where(valid_line)[0]
 
             if len(valid_indices) > 0:
                 # Get physical coordinates and dose values for valid MCC points
@@ -89,12 +105,10 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
 
                 mcc_values = mcc_line_values[valid_indices]
 
-                # matrix_data가 flipud되어 이미 올바른 순서이므로 역순 정렬 불필요
-                # Before: MCC는 y=-130→130 순서여서 수동 정렬 필요했음
-                # After: flipud 후 y=130→-130 순서로 DICOM과 동일
-                # if sort_required:  # 삭제됨 - flipud로 자동 해결
-                #     mcc_phys_coords = mcc_phys_coords[::-1]
-                #     mcc_values = mcc_values[::-1]
+                if len(mcc_phys_coords) > 1 and np.any(np.diff(mcc_phys_coords) < 0):
+                    sort_indices = np.argsort(mcc_phys_coords)
+                    mcc_phys_coords = mcc_phys_coords[sort_indices]
+                    mcc_values = mcc_values[sort_indices]
 
                 # Find corresponding DICOM values at MCC measurement points
                 dicom_at_mcc_positions = np.array([
@@ -157,28 +171,20 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
             - dta_map_interp (np.ndarray): Interpolated DTA map (on DICOM grid).
     """
     try:
-        # --- Step 1: Extract and filter reference data (MCC) ---
-        mcc_dose_data = reference_handler.get_matrix_data()
-        if mcc_dose_data is None:
-            raise ValueError("MCC data not found in reference_handler.")
+        # --- Step 1: Extract and filter reference data ---
+        reference_grid, reference_valid_mask = _get_handler_grid(reference_handler)
+        if reference_grid is None:
+            raise ValueError("Reference data not found in reference_handler.")
 
-        # Get all valid (>=0) measurement points and their coordinates
-        all_valid_indices = np.where(mcc_dose_data >= 0)
+        all_valid_indices = np.where(reference_valid_mask)
         if all_valid_indices[0].size == 0:
-            raise ValueError("No valid measurement data (>= 0) in MCC file.")
+            raise ValueError("No valid reference data in the selected file.")
 
-        # Vectorized calculation of physical coordinates from pixel coordinates
-        y_pix, x_pix = all_valid_indices
-        handler = reference_handler
-        full_grid_px = x_pix + handler.crop_pixel_offset[0]
-        full_grid_py = y_pix + handler.crop_pixel_offset[1]
-        phys_x_all = (full_grid_px - handler.mcc_origin_x) * handler.mcc_spacing_x
-        # Y축 음수 부호: pixel_to_physical_coord()와 동일한 변환 규칙 적용
-        # matrix_data가 flipud되었으므로 음수 부호로 좌표 일관성 유지
-        phys_y_all = -(full_grid_py - handler.mcc_origin_y) * handler.mcc_spacing_y
-        all_mcc_coords_phys = np.vstack((phys_x_all, phys_y_all)).T
-
-        all_mcc_dose_values = mcc_dose_data[all_valid_indices]
+        all_mcc_coords_phys = np.column_stack((
+            reference_handler.phys_x_mesh[all_valid_indices],
+            reference_handler.phys_y_mesh[all_valid_indices]
+        ))
+        all_mcc_dose_values = reference_grid[all_valid_indices]
 
         # Determine normalization dose for thresholding
         if global_normalisation:
@@ -205,9 +211,9 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
 
         # If no points are left after filtering, return early.
         if not np.any(analysis_mask):
-            logger.warning(f"No MCC data points above the {threshold}% dose threshold ({threshold_dose:.2f} Gy). Gamma analysis will be skipped.")
+            logger.warning(f"No reference data points above the {threshold}% dose threshold ({threshold_dose:.2f} Gy). Gamma analysis will be skipped.")
             gamma_stats = {'pass_rate': 100, 'mean': 0, 'max': 0, 'min': 0, 'total_points': 0}
-            gamma_map_for_display = np.full_like(mcc_dose_data, np.nan)
+            gamma_map_for_display = np.full_like(reference_grid, np.nan)
             # Still create interpolated data for the report
             mcc_interp_data = griddata(
                 all_mcc_coords_phys, all_mcc_dose_values,
@@ -215,8 +221,8 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
                 method='linear', fill_value=0
             )
             # Return empty dd and dta maps when no analysis is performed
-            dd_map_empty = np.full_like(mcc_dose_data, np.nan)
-            dta_map_empty = np.full_like(mcc_dose_data, np.nan)
+            dd_map_empty = np.full_like(reference_grid, np.nan)
+            dta_map_empty = np.full_like(reference_grid, np.nan)
             dd_stats_empty = {'mean': 0, 'max': 0, 'min': 0, 'std': 0, 'total_points': 0}
             dta_stats_empty = {'mean': 0, 'max': 0, 'min': 0, 'std': 0, 'total_points': 0}
 
@@ -296,9 +302,9 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
                 logger.info(f"Processed {i + 1}/{len(points_ref)} reference points...")
 
         # --- Step 4: Create gamma, dd, and dta maps and calculate statistics ---
-        gamma_map_for_display = np.full_like(mcc_dose_data, np.nan)
-        dd_map_for_display = np.full_like(mcc_dose_data, np.nan)
-        dta_map_for_display = np.full_like(mcc_dose_data, np.nan)
+        gamma_map_for_display = np.full_like(reference_grid, np.nan)
+        dd_map_for_display = np.full_like(reference_grid, np.nan)
+        dta_map_for_display = np.full_like(reference_grid, np.nan)
 
         gamma_map_for_display[original_indices_for_gamma] = gamma_values
         dd_map_for_display[original_indices_for_gamma] = dd_values

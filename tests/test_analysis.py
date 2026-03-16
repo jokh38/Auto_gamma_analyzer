@@ -1,99 +1,138 @@
-import unittest
-import numpy as np
 import os
 import sys
+import unittest
+
+import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.standard_data_model import ROI_Data
 from src.analysis import extract_profile_data, perform_gamma_analysis
 
+
+class DenseHandler:
+    def __init__(self, data, x_coords, y_coords):
+        self.pixel_data = np.array(data, dtype=float)
+        self.phys_x_mesh, self.phys_y_mesh = np.meshgrid(x_coords, y_coords)
+        self.physical_extent = [float(np.min(x_coords)), float(np.max(x_coords)), float(np.min(y_coords)), float(np.max(y_coords))]
+        self.filename = "dense.dcm"
+        self.crop_pixel_offset = (0, 0)
+
+    def get_pixel_data(self):
+        return self.pixel_data
+
+    def get_physical_extent(self):
+        return self.physical_extent
+
+
+class SparseHandler(DenseHandler):
+    def __init__(self, data, x_coords, y_coords):
+        super().__init__(data, x_coords, y_coords)
+        self.matrix_data = self.pixel_data.copy()
+        self.filename = "sparse.mcc"
+
+    def get_matrix_data(self):
+        return self.matrix_data
+
+
 class TestAnalysisFunctions(unittest.TestCase):
+    def test_extract_profile_data_with_dense_file_b(self):
+        x_coords = np.array([0.0, 10.0, 20.0])
+        y_coords = np.array([20.0, 10.0, 0.0])
 
-    def test_extract_profile_data_with_roi(self):
-        """
-        Tests the refactored extract_profile_data function with an ROI_Data object.
-        """
-        # 1. Given: Create a sample ROI_Data object
-        roi = ROI_Data(
-            dose_grid=np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]]),
-            x_coords=np.array([10, 20, 30]),
-            y_coords=np.array([5, 15, 25]),
-            x_indices=np.arange(3),
-            y_indices=np.arange(3),
-            physical_extent=[5, 35, 0, 30],
-            source_metadata={}
+        file_a = DenseHandler(
+            data=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+            x_coords=x_coords,
+            y_coords=y_coords,
+        )
+        file_b = DenseHandler(
+            data=[[2, 3, 4], [5, 6, 7], [8, 9, 10]],
+            x_coords=x_coords,
+            y_coords=y_coords,
         )
 
-        # 2. When: Extract a vertical profile at x=20 (the middle column)
-        profile = extract_profile_data(direction="vertical", fixed_position=20, roi_data=roi)
-
-        # 3. Then: Assert the profile is correct
-        self.assertIsNotNone(profile)
-        np.testing.assert_array_equal(profile['phys_coords'], roi.y_coords)
-        np.testing.assert_array_equal(profile['dicom_values'], [2, 5, 8]) # Middle column
-        self.assertEqual(profile['type'], "vertical")
-        self.assertEqual(profile['fixed_pos'], 20)
-
-        # When: Extract a horizontal profile at y=15 (the middle row)
-        profile = extract_profile_data(direction="horizontal", fixed_position=15, roi_data=roi)
-
-        # Then: Assert the profile is correct
-        self.assertIsNotNone(profile)
-        np.testing.assert_array_equal(profile['phys_coords'], roi.x_coords)
-        np.testing.assert_array_equal(profile['dicom_values'], [4, 5, 6]) # Middle row
-        self.assertEqual(profile['type'], "horizontal")
-        self.assertEqual(profile['fixed_pos'], 15)
-
-
-    def test_perform_gamma_analysis_with_roi(self):
-        """
-        Tests the refactored perform_gamma_analysis function with ROI_Data objects.
-        """
-        # 1. Given: Create two simple ROI_Data objects that should be easy to compare.
-        # Let's make the eval data a slightly shifted version of the ref data.
-        ref_grid = np.zeros((10, 10))
-        ref_grid[3:7, 3:7] = 100 # A hot spot
-
-        eval_grid = np.zeros((10, 10))
-        eval_grid[3:7, 4:8] = 105 # Shifted right and slightly higher dose
-
-        common_coords = np.arange(10)
-
-        # Create a 4x4 grid of reference points to satisfy the cubic interpolator
-        xs = np.linspace(4, 6, 4)
-        ys = np.linspace(4, 6, 4)
-        ref_points_x, ref_points_y = np.meshgrid(xs, ys)
-        ref_coords = np.vstack([ref_points_x.ravel(), ref_points_y.ravel()]).T
-        ref_values = np.full(ref_coords.shape[0], 100)
-
-        ref_roi = ROI_Data(
-            dose_grid=ref_grid, x_coords=common_coords, y_coords=common_coords,
-            x_indices=common_coords, y_indices=common_coords,
-            physical_extent=[0,9,0,9], source_metadata={'original_points': {'coords': ref_coords, 'values': ref_values}}
+        profile = extract_profile_data(
+            direction="vertical",
+            fixed_position=10.0,
+            dicom_handler=file_a,
+            mcc_handler=file_b,
         )
 
-        eval_roi = ROI_Data(
-            dose_grid=eval_grid, x_coords=common_coords, y_coords=common_coords,
-            x_indices=common_coords, y_indices=common_coords,
-            physical_extent=[0,9,0,9], source_metadata={}
+        np.testing.assert_array_equal(profile["phys_coords"], np.array([0.0, 10.0, 20.0]))
+        np.testing.assert_array_equal(profile["dicom_values"], np.array([8.0, 5.0, 2.0]))
+        np.testing.assert_array_equal(profile["mcc_phys_coords"], np.array([0.0, 10.0, 20.0]))
+        np.testing.assert_array_equal(profile["mcc_values"], np.array([9.0, 6.0, 3.0]))
+        np.testing.assert_array_equal(profile["dicom_at_mcc"], np.array([8.0, 5.0, 2.0]))
+
+    def test_extract_profile_data_with_sparse_file_b(self):
+        x_coords = np.array([0.0, 10.0, 20.0])
+        y_coords = np.array([20.0, 10.0, 0.0])
+
+        file_a = DenseHandler(
+            data=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+            x_coords=x_coords,
+            y_coords=y_coords,
+        )
+        file_b = SparseHandler(
+            data=[[2, -1, 4], [5, 6, -1], [8, 9, 10]],
+            x_coords=x_coords,
+            y_coords=y_coords,
         )
 
-        # 2. When: Perform gamma analysis.
-        # The core change is passing ROI objects directly. The threshold parameter is removed.
-        gamma_map, stats, _, _, _, _, _, _ = perform_gamma_analysis(
-            reference_roi=ref_roi,
-            evaluation_roi=eval_roi,
+        profile = extract_profile_data(
+            direction="horizontal",
+            fixed_position=10.0,
+            dicom_handler=file_a,
+            mcc_handler=file_b,
+        )
+
+        np.testing.assert_array_equal(profile["phys_coords"], np.array([0.0, 10.0, 20.0]))
+        np.testing.assert_array_equal(profile["dicom_values"], np.array([4.0, 5.0, 6.0]))
+        np.testing.assert_array_equal(profile["mcc_phys_coords"], np.array([0.0, 10.0]))
+        np.testing.assert_array_equal(profile["mcc_values"], np.array([5.0, 6.0]))
+        np.testing.assert_array_equal(profile["dicom_at_mcc"], np.array([4.0, 5.0]))
+
+    def test_perform_gamma_analysis_with_dense_reference(self):
+        coords = np.arange(5, dtype=float)
+        ref_data = np.zeros((5, 5), dtype=float)
+        eval_data = np.zeros((5, 5), dtype=float)
+
+        ref_data[1:4, 1:4] = 100.0
+        eval_data[1:4, 2:5] = 100.0
+
+        reference_handler = DenseHandler(ref_data, coords, coords)
+        evaluation_handler = DenseHandler(eval_data, coords, coords)
+
+        (
+            gamma_map,
+            stats,
+            _,
+            interp_ref,
+            dd_map,
+            dta_map,
+            dd_stats,
+            dta_stats,
+            gamma_map_interp,
+            _,
+            _,
+        ) = perform_gamma_analysis(
+            reference_handler=reference_handler,
+            evaluation_handler=evaluation_handler,
             dose_percent_threshold=3,
-            distance_mm_threshold=3
+            distance_mm_threshold=3,
         )
 
-        # 3. Then: Assert that the results are reasonable.
-        # A detailed check is complex, so we'll check the pass rate.
-        # Given the shift and dose difference, the pass rate should not be 100%.
-        self.assertIsNotNone(stats)
-        self.assertIn('pass_rate', stats)
-        self.assertLess(stats['pass_rate'], 100)
+        self.assertEqual(gamma_map.shape, ref_data.shape)
+        self.assertEqual(interp_ref.shape, eval_data.shape)
+        self.assertEqual(dd_map.shape, ref_data.shape)
+        self.assertEqual(dta_map.shape, ref_data.shape)
+        self.assertEqual(gamma_map_interp.shape, eval_data.shape)
+        self.assertIn("pass_rate", stats)
+        self.assertGreater(stats["total_points"], 0)
+        self.assertLessEqual(stats["pass_rate"], 100.0)
+        self.assertGreater(stats["mean"], 0.0)
+        self.assertGreater(dd_stats["total_points"], 0)
+        self.assertGreater(dta_stats["total_points"], 0)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

@@ -86,6 +86,8 @@ class AppController:
                 dm.mcc_handler = dm.file_b_handler
             elif file_a_is_mcc:
                 dm.mcc_handler = dm.file_a_handler
+            else:
+                dm.mcc_handler = dm.file_b_handler
 
             if not file_a_is_mcc:
                 dm.dicom_handler = dm.file_a_handler
@@ -253,9 +255,9 @@ class AppController:
             # Store handler in data manager
             self.data_manager.file_b_handler = handler
 
-            # Crop to match File A bounds if File A is loaded and is DICOM
+            # Crop to match File A bounds when the File B handler supports it.
             if self.data_manager.file_a_handler and hasattr(self.data_manager.file_a_handler, 'dose_bounds'):
-                if self.data_manager.file_a_handler.dose_bounds:
+                if self.data_manager.file_a_handler.dose_bounds and hasattr(handler, 'crop_to_bounds'):
                     handler.crop_to_bounds(self.data_manager.file_a_handler.dose_bounds)
 
             # For backward compatibility with existing code
@@ -333,8 +335,8 @@ class AppController:
         dm = self.data_manager
 
         # Check if handlers are available
-        if not dm.dicom_handler or not dm.mcc_handler:
-            QMessageBox.warning(self.main_view, "Warning", "Both DICOM and MCC handlers must be available to generate report.")
+        if not dm.file_a_handler or not dm.file_b_handler:
+            QMessageBox.warning(self.main_view, "Warning", "Both File A and File B must be available to generate report.")
             return
 
         try:
@@ -342,9 +344,9 @@ class AppController:
             report_dir = os.path.join(base_dir, 'Report')
             os.makedirs(report_dir, exist_ok=True)
 
-            # Get patient info from DICOM handler
-            institution, patient_id, patient_name = dm.dicom_handler.get_patient_info()
-            dicom_filename = dm.dicom_handler.get_filename()
+            # Use File A as the primary report source.
+            institution, patient_id, patient_name = dm.file_a_handler.get_patient_info()
+            dicom_filename = dm.file_a_handler.get_filename()
             dicom_filename_base = os.path.splitext(dicom_filename)[0] if dicom_filename else 'file'
 
             default_path = os.path.join(report_dir, f"report_{patient_id}_{dicom_filename_base}.jpg")
@@ -360,8 +362,8 @@ class AppController:
 
             generate_report(
                 output_path=output_path,
-                dicom_handler=dm.dicom_handler,
-                mcc_handler=dm.mcc_handler,
+                dicom_handler=dm.file_a_handler,
+                mcc_handler=dm.file_b_handler,
                 gamma_map=dm.gamma_map,
                 gamma_stats=dm.gamma_stats,
                 dta=self.main_view.dta_spin.value(),

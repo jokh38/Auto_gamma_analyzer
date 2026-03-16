@@ -316,6 +316,38 @@ class DicomFileHandler(BaseFileHandler):
 
         return institution, patient_id, patient_name
 
+    def crop_to_bounds(self, bounds):
+        """Crops DICOM data to the requested physical bounds."""
+        if self.pixel_data is None or bounds is None:
+            return
+
+        full_pixel_data = self.pixel_data
+        full_phys_x_mesh = self.phys_x_mesh
+        full_phys_y_mesh = self.phys_y_mesh
+
+        min_px, py_for_min_y = self.physical_to_pixel_coord(bounds['min_x'], bounds['min_y'])
+        max_px, py_for_max_y = self.physical_to_pixel_coord(bounds['max_x'], bounds['max_y'])
+
+        min_py = py_for_max_y
+        max_py = py_for_min_y
+
+        if min_py > max_py:
+            min_py, max_py = max_py, min_py
+        if min_px > max_px:
+            min_px, max_px = max_px, min_px
+
+        h, w = full_pixel_data.shape
+        min_py, max_py = max(0, min_py), min(h, max_py + 1)
+        min_px, max_px = max(0, min_px), min(w, max_px + 1)
+
+        self.pixel_data = full_pixel_data[min_py:max_py, min_px:max_px]
+        self.phys_x_mesh = full_phys_x_mesh[min_py:max_py, min_px:max_px]
+        self.phys_y_mesh = full_phys_y_mesh[min_py:max_py, min_px:max_px]
+        self.crop_pixel_offset = (self.crop_pixel_offset[0] + min_px, self.crop_pixel_offset[1] + min_py)
+        self.physical_extent = [self.phys_x_mesh.min(), self.phys_x_mesh.max(), self.phys_y_mesh.min(), self.phys_y_mesh.max()]
+        self.dose_bounds = bounds
+        logger.info(f"DICOM data has been cropped to requested bounds. New shape: {self.pixel_data.shape}")
+
     def create_physical_coordinates_dcm(self):
         """Creates physical coordinate meshes based on DICOM metadata."""
         if self.pixel_data is None: return
