@@ -7,19 +7,14 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize, LinearSegmentedColormap, TwoSlopeNorm
+from matplotlib.colors import Normalize
+from src.plot_styles import get_gamma_colormap, get_gamma_norm
 
 class MatplotlibCanvas(FigureCanvas):
     """Matplotlib 캔버스 위젯"""
     def __init__(self, parent=None, width=5, height=4, dpi=100):
-        # Use dark background style for plots
-        plt.style.use('dark_background')
-        
         self.fig = Figure(figsize=(width, height), dpi=dpi)
-        # Ensure figure background matches the UI background
         self.fig.patch.set_facecolor('#2b2b2b')
-        
-        self.axes = self.fig.add_subplot(111)
         super(MatplotlibCanvas, self).__init__(self.fig)
         self.setParent(parent)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -31,9 +26,10 @@ class MatplotlibCanvas(FigureCanvas):
         
         # Update rcParams for better visibility
         self.update_plot_style()
+        self.axes = self.fig.add_subplot(111)
 
     def update_plot_style(self):
-        """Configure plot styles for dark theme"""
+        """Configure plot styles for the original dark theme."""
         params = {
             'axes.facecolor': '#1e1e1e',
             'axes.edgecolor': '#888888',
@@ -51,7 +47,6 @@ class MatplotlibCanvas(FigureCanvas):
         self.fig.set_facecolor('#2b2b2b')
         for key, val in params.items():
             plt.rcParams[key] = val
-
 
 class ProfileDataTable(QTableWidget):
     """프로파일 데이터 표시용 테이블 위젯"""
@@ -279,8 +274,15 @@ class PlotManager:
             self.profile_canvas.axes.set_ylabel('Dose (Gy)')
             self.profile_canvas.axes.set_title(f'Dose Profile: {title_prefix}')
 
-            if self.data_manager.dicom_roi:
+            extent = None
+            if self.data_manager.file_a_handler is not None:
+                extent = self.data_manager.file_a_handler.get_physical_extent()
+            elif self.data_manager.dicom_handler is not None:
+                extent = self.data_manager.dicom_handler.get_physical_extent()
+            elif self.data_manager.dicom_roi is not None:
                 extent = self.data_manager.dicom_roi.physical_extent
+
+            if extent is not None:
                 lims = (extent[2], extent[3]) if profile_direction == "vertical" else (extent[0], extent[1])
                 self.profile_canvas.axes.set_xlim(lims)
 
@@ -397,7 +399,7 @@ class PlotManager:
             )
 
     def draw_gamma_map(self):
-        """Draws the gamma map with pass values in blue/green and failing values in red."""
+        """Draw the gamma map using the shared report colormap."""
         dm = self.data_manager
         if dm.gamma_stats and 'pass_rate' in dm.gamma_stats:
             gamma_data = dm.gamma_map_interp if dm.gamma_map_interp is not None else dm.gamma_map
@@ -407,22 +409,11 @@ class PlotManager:
             gamma_display = np.array(gamma_data, dtype=float, copy=True)
             gamma_display[~np.isfinite(gamma_display)] = np.nan
 
-            cmap = LinearSegmentedColormap.from_list(
-                "gamma_pass_fail",
-                [
-                    (0.0, "#153b8a"),
-                    (0.35, "#1fa3c8"),
-                    (0.499, "#35b779"),
-                    (0.5, "#fee08b"),
-                    (0.72, "#f46d43"),
-                    (1.0, "#b2182b"),
-                ],
-            )
-            cmap.set_bad(color="#1e1e1e")
+            cmap = get_gamma_colormap()
 
             finite_values = gamma_display[np.isfinite(gamma_display)]
             max_gamma = float(np.nanmax(finite_values)) if finite_values.size else 2.0
-            norm = TwoSlopeNorm(vmin=0.0, vcenter=1.0, vmax=max(2.0, max_gamma))
+            norm = get_gamma_norm(max_gamma)
 
             im = self.gamma_canvas.axes.imshow(
                 gamma_display,
