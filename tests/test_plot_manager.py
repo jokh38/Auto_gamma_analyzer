@@ -76,5 +76,30 @@ class TestPlotManager(unittest.TestCase):
 
         print("PlotManager Test: PASS")
 
+    def test_get_profile_gamma_values_for_vertical_profile(self):
+        class ReferenceHandler:
+            def __init__(self):
+                x_coords = np.array([0.0, 10.0, 20.0])
+                y_coords = np.array([20.0, 10.0, 0.0])
+                self.phys_x_mesh, self.phys_y_mesh = np.meshgrid(x_coords, y_coords)
+
+        self.data_manager.file_b_handler = ReferenceHandler()
+        self.data_manager.gamma_map = np.array([
+            [0.1, 0.2, 0.3],
+            [0.4, 0.5, 0.6],
+            [0.7, 0.8, 0.9],
+        ])
+
+        plot_manager = PlotManager(self.data_manager, None, None, None, None, None)
+        profile_data = {
+            "type": "vertical",
+            "fixed_pos": 10.0,
+            "mcc_phys_coords": np.array([20.0, 10.0, 0.0]),
+        }
+
+        gamma_values = plot_manager._get_profile_gamma_values(profile_data)
+
+        np.testing.assert_allclose(gamma_values, np.array([0.2, 0.5, 0.8]))
+
 if __name__ == '__main__':
     unittest.main()

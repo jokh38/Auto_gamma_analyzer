@@ -2,7 +2,7 @@ import numpy as np
 from scipy.interpolate import griddata, interpn
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -22,6 +22,8 @@ class MatplotlibCanvas(FigureCanvas):
         self.axes = self.fig.add_subplot(111)
         super(MatplotlibCanvas, self).__init__(self.fig)
         self.setParent(parent)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.updateGeometry()
         
         # Adjust layout to maximize space and ensure labels are visible
         self.fig.tight_layout()
@@ -55,11 +57,15 @@ class ProfileDataTable(QTableWidget):
     """프로파일 데이터 표시용 테이블 위젯"""
     def __init__(self, parent=None):
         super(ProfileDataTable, self).__init__(parent)
-        self.setColumnCount(3)
-        self.setHorizontalHeaderLabels(['Position (mm)', 'A (cGy)', 'B (cGy)'])
+        self.setColumnCount(4)
+        self.setHorizontalHeaderLabels(['Position (mm)', 'A (cGy)', 'B (cGy)', 'Gamma'])
         self.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+
+    def set_profile_direction(self, direction):
+        axis_label = "Y(mm)" if direction == "vertical" else "X(mm)"
+        self.setHorizontalHeaderLabels([axis_label, 'A (cGy)', 'B (cGy)', 'Gamma'])
         
-    def update_data(self, positions, dose_values, measurement_values=None):
+    def update_data(self, positions, dose_values, measurement_values=None, gamma_values=None):
         if measurement_values is None or len(measurement_values) == 0:
             self.setRowCount(len(positions))
             for i, (pos, dose) in enumerate(zip(positions, dose_values)):
@@ -74,11 +80,20 @@ class ProfileDataTable(QTableWidget):
                 item_na = QTableWidgetItem("N/A")
                 item_na.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.setItem(i, 2, item_na)
+
+                item_gamma = QTableWidgetItem("N/A")
+                item_gamma.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.setItem(i, 3, item_gamma)
         else:
             valid_indices = ~np.isnan(measurement_values)
             valid_positions = positions[valid_indices]
             valid_dose_values = dose_values[valid_indices]
             valid_measurements = measurement_values[valid_indices]
+            valid_gamma = None
+            if gamma_values is not None:
+                gamma_values = np.asarray(gamma_values)
+                if len(gamma_values) == len(positions):
+                    valid_gamma = gamma_values[valid_indices]
 
             self.setRowCount(len(valid_positions))
 
@@ -95,6 +110,14 @@ class ProfileDataTable(QTableWidget):
                 item_meas.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.setItem(i, 2, item_meas)
 
+                gamma_text = "N/A"
+                if valid_gamma is not None and i < len(valid_gamma) and np.isfinite(valid_gamma[i]):
+                    gamma_text = f"{valid_gamma[i]:.3f}"
+
+                item_gamma = QTableWidgetItem(gamma_text)
+                item_gamma.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.setItem(i, 3, item_gamma)
+
 
 def draw_image(canvas, image_data, extent, title, colorbar_label=None,
                show_origin=True, show_colorbar=True, line=None):
@@ -110,11 +133,12 @@ def draw_image(canvas, image_data, extent, title, colorbar_label=None,
         image_data,
         cmap='jet',
         extent=extent,
-        origin='upper'
+        origin='upper',
+        aspect='equal'
     )
     
     if show_colorbar and colorbar_label is not None:
-        canvas.fig.colorbar(im, ax=canvas.axes, label=colorbar_label)
+        canvas.fig.colorbar(im, ax=canvas.axes, label=colorbar_label, use_gridspec=True, fraction=0.046, pad=0.04)
     
     if show_origin:
         canvas.axes.plot(0, 0, 'wo', markersize=3, markeredgecolor='black')
@@ -126,9 +150,10 @@ def draw_image(canvas, image_data, extent, title, colorbar_label=None,
             canvas.axes.axhline(y=line["y"], color='white', linestyle='-', linewidth=2)
     
     canvas.axes.set_title(title)
+    canvas.axes.set_aspect('equal', adjustable='box')
     
     canvas.fig.tight_layout()
-    canvas.draw()
+    canvas.draw_idle()
 
 
 from src.data_manager import DataManager
@@ -227,6 +252,8 @@ class PlotManager:
         if not profile_data: return
 
         try:
+            if self.profile_table is not None:
+                self.profile_table.set_profile_direction(profile_direction)
             self.profile_canvas.fig.clear()
             self.profile_canvas.axes = self.profile_canvas.fig.add_subplot(111)
 
@@ -295,7 +322,13 @@ class PlotManager:
             self.profile_canvas.draw()
 
             if 'mcc_phys_coords' in profile_data:
-                self.profile_table.update_data(profile_data['mcc_phys_coords'], profile_data['dicom_at_mcc'], profile_data['mcc_values'])
+                gamma_values = self._get_profile_gamma_values(profile_data)
+                self.profile_table.update_data(
+                    profile_data['mcc_phys_coords'],
+                    profile_data['dicom_at_mcc'],
+                    profile_data['mcc_values'],
+                    gamma_values=gamma_values
+                )
             else:
                 self.profile_table.update_data(phys_coords, dicom_values)
 
@@ -396,21 +429,39 @@ class PlotManager:
                 cmap=cmap,
                 norm=norm,
                 extent=dm.phys_extent,
-                origin='upper'
+                origin='upper',
+                aspect='equal'
             )
-            self.gamma_canvas.fig.colorbar(im, ax=self.gamma_canvas.axes, label='Gamma Index')
+            self.gamma_canvas.fig.colorbar(
+                im,
+                ax=self.gamma_canvas.axes,
+                label='Gamma Index',
+                use_gridspec=True,
+                fraction=0.046,
+                pad=0.04
+            )
             self.gamma_canvas.axes.plot(0, 0, 'wo', markersize=3, markeredgecolor='black')
+            if dm.profile_line is not None:
+                if dm.profile_line["type"] == "vertical":
+                    self.gamma_canvas.axes.axvline(
+                        x=dm.profile_line["x"], color='white', linestyle='-', linewidth=2
+                    )
+                else:
+                    self.gamma_canvas.axes.axhline(
+                        y=dm.profile_line["y"], color='white', linestyle='-', linewidth=2
+                    )
+            self.gamma_canvas.axes.set_aspect('equal', adjustable='box')
             self.gamma_canvas.axes.set_title(
-                f'Gamma Analysis: Pass Rate = {dm.gamma_stats["pass_rate"]:.2f}%'
+                f'Pass Rate = {dm.gamma_stats["pass_rate"]:.2f}%'
             )
             self.gamma_canvas.fig.tight_layout()
-            self.gamma_canvas.draw()
+            self.gamma_canvas.draw_idle()
         else:
             # Clear the canvas if there's no data
             self.gamma_canvas.fig.clear()
             self.gamma_canvas.axes = self.gamma_canvas.fig.add_subplot(111)
             self.gamma_canvas.axes.set_title("Gamma Analysis")
-            self.gamma_canvas.draw()
+            self.gamma_canvas.draw_idle()
 
     def handle_image_click(self, event, profile_direction, source="A"):
         """
@@ -450,6 +501,52 @@ class PlotManager:
         dm.profile_line = {"type": profile_direction, "x": phys_x} if profile_direction == "vertical" else {"type": "horizontal", "y": phys_y}
 
         self.redraw_all_images()
+        if dm.gamma_stats is not None:
+            self.draw_gamma_map()
         profile_data = self.generate_profile_data()
         self.draw_profile(profile_data, profile_direction)
         return True
+
+    def _get_profile_gamma_values(self, profile_data):
+        """Map current profile sample positions to the available gamma result grid."""
+        dm = self.data_manager
+        gamma_map = dm.gamma_map
+        profile_positions = profile_data.get('mcc_phys_coords')
+        if gamma_map is None or profile_positions is None or len(profile_positions) == 0:
+            return None
+
+        reference_handler = dm.file_b_handler or dm.mcc_handler
+        if reference_handler is None:
+            return None
+
+        try:
+            if profile_data.get('type') == "vertical":
+                fixed_position = profile_data.get('fixed_pos')
+                fixed_axis_coords = reference_handler.phys_x_mesh[0, :]
+                profile_axis_mesh = reference_handler.phys_y_mesh
+                closest_idx = int(np.argmin(np.abs(fixed_axis_coords - fixed_position)))
+                gamma_line = gamma_map[:, closest_idx]
+                gamma_positions = profile_axis_mesh[:, closest_idx]
+            else:
+                fixed_position = profile_data.get('fixed_pos')
+                fixed_axis_coords = reference_handler.phys_y_mesh[:, 0]
+                profile_axis_mesh = reference_handler.phys_x_mesh
+                closest_idx = int(np.argmin(np.abs(fixed_axis_coords - fixed_position)))
+                gamma_line = gamma_map[closest_idx, :]
+                gamma_positions = profile_axis_mesh[closest_idx, :]
+
+            gamma_positions = np.asarray(gamma_positions, dtype=float)
+            gamma_line = np.asarray(gamma_line, dtype=float)
+
+            if gamma_positions.shape != gamma_line.shape:
+                return None
+
+            gamma_values = np.full(len(profile_positions), np.nan, dtype=float)
+            for i, pos in enumerate(profile_positions):
+                nearest_idx = int(np.argmin(np.abs(gamma_positions - pos)))
+                if np.isclose(gamma_positions[nearest_idx], pos, atol=1e-6):
+                    gamma_values[i] = gamma_line[nearest_idx]
+
+            return gamma_values
+        except Exception:
+            return None

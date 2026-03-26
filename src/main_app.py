@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSpinBox, QDoubleSpinBox, QComboBox, QGridLayout, 
                              QScrollArea, QGroupBox, QMessageBox, QSplitter, QFrame,
                              QSizePolicy)
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from typing import Optional
 
 from src.data_manager import DataManager
@@ -41,9 +41,13 @@ class GammaAnalysisApp(QMainWindow):
             self.profile_canvas, self.gamma_canvas, self.profile_table
         )
         self.controller = AppController(self, self.data_manager, self.plot_manager)
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._refresh_after_resize)
 
         # Connect UI signals to controller methods
         self.connect_signals()
+        self.controller.set_profile_direction(self.profile_direction)
 
         # Apply Dark Theme
         self.setStyleSheet(DARK_THEME_QSS)
@@ -61,7 +65,9 @@ class GammaAnalysisApp(QMainWindow):
         
         # --- Left Sidebar ---
         sidebar = QFrame()
-        sidebar.setFixedWidth(300)
+        sidebar.setMinimumWidth(340)
+        sidebar.setMaximumWidth(420)
+        sidebar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         sidebar.setStyleSheet("background-color: #252526; border-right: 1px solid #333;")
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(15, 15, 15, 15)
@@ -71,20 +77,22 @@ class GammaAnalysisApp(QMainWindow):
         device_group = QGroupBox("Device Info")
         device_layout = QVBoxLayout(device_group)
         self.device_label = QLabel("Device Type: Not detected")
-        self.origin_label = QLabel("Origin: Not set")
         device_layout.addWidget(self.device_label)
-        device_layout.addWidget(self.origin_label)
         
         # 3. Origin Adjustment
         origin_group = QGroupBox("Origin Adjustment")
         origin_layout = QGridLayout(origin_group)
-        self.dicom_x_spin = QSpinBox()
-        self.dicom_x_spin.setRange(-2000, 2000)
-        self.dicom_y_spin = QSpinBox()
-        self.dicom_y_spin.setRange(-2000, 2000)
-        origin_layout.addWidget(QLabel("DICOM X (px):"), 0, 0)
+        self.dicom_x_spin = QDoubleSpinBox()
+        self.dicom_x_spin.setRange(-2000.0, 2000.0)
+        self.dicom_x_spin.setDecimals(2)
+        self.dicom_x_spin.setSingleStep(1.0)
+        self.dicom_y_spin = QDoubleSpinBox()
+        self.dicom_y_spin.setRange(-2000.0, 2000.0)
+        self.dicom_y_spin.setDecimals(2)
+        self.dicom_y_spin.setSingleStep(1.0)
+        origin_layout.addWidget(QLabel("Delta X (mm):"), 0, 0)
         origin_layout.addWidget(self.dicom_x_spin, 0, 1)
-        origin_layout.addWidget(QLabel("DICOM Y (px):"), 1, 0)
+        origin_layout.addWidget(QLabel("Delta Y (mm):"), 1, 0)
         origin_layout.addWidget(self.dicom_y_spin, 1, 1)
         
         # 4. Profile Direction
@@ -119,11 +127,13 @@ class GammaAnalysisApp(QMainWindow):
         # 6. Execution
         run_report_group = QGroupBox("Actions")
         run_report_layout = QVBoxLayout(run_report_group)
-        self.run_gamma_btn = QPushButton("Run Gamma Analysis")
-        self.run_gamma_btn.setStyleSheet("background-color: #007acc; font-weight: bold;") # Highlight action button
         self.generate_report_btn = QPushButton("Generate Report")
         self.generate_report_btn.setEnabled(False)
-        run_report_layout.addWidget(self.run_gamma_btn)
+        for button in (self.vertical_btn, self.horizontal_btn, self.generate_report_btn, self.close_btn if hasattr(self, "close_btn") else None):
+            if button is not None:
+                button.setMinimumHeight(34)
+                button.setMinimumWidth(max(button.minimumWidth(), 150))
+                button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         run_report_layout.addWidget(self.generate_report_btn)
         
         sidebar_layout.addWidget(device_group)
@@ -136,6 +146,8 @@ class GammaAnalysisApp(QMainWindow):
         
         self.close_btn = QPushButton("Close App")
         self.close_btn.setObjectName("closeBtn")
+        self.close_btn.setMinimumHeight(36)
+        self.close_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         sidebar_layout.addWidget(self.close_btn)
         
         # --- Main Content Area (Right) ---
@@ -158,37 +170,51 @@ class GammaAnalysisApp(QMainWindow):
         # File A Container (Top)
         self.dicom_canvas = MatplotlibCanvas(self)
         dicom_header_layout = QHBoxLayout()
+        dicom_header_layout.setContentsMargins(0, 0, 0, 0)
+        dicom_header_layout.setSpacing(8)
         self.load_dicom_btn = QPushButton("Load File A")
         self.load_dicom_btn.setObjectName("loadBtn")
+        self.load_dicom_btn.setMinimumHeight(34)
+        self.load_dicom_btn.setMinimumWidth(110)
         self.dicom_label = QLabel("File A: None")
         self.dicom_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.dicom_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.dicom_label.setMinimumHeight(34)
         dicom_header_layout.addWidget(self.load_dicom_btn)
         dicom_header_layout.addWidget(self.dicom_label)
         dicom_header_layout.addStretch()
         
         dicom_container = QWidget()
         dicom_layout = QVBoxLayout(dicom_container)
+        dicom_layout.setContentsMargins(0, 0, 0, 0)
+        dicom_layout.setSpacing(6)
         dicom_layout.addLayout(dicom_header_layout)
         dicom_layout.addWidget(self.dicom_canvas)
         
         # Profile Container (Bottom)
         profile_container = QWidget()
         profile_layout = QVBoxLayout(profile_container)
-        
+        profile_layout.setContentsMargins(0, 0, 0, 0)
+        profile_layout.setSpacing(6)
+
         profile_header_layout = QHBoxLayout()
+        profile_header_layout.setContentsMargins(0, 0, 0, 0)
+        profile_header_layout.setSpacing(8)
         profile_title = QLabel("Profile Plot")
         profile_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        profile_title.setMinimumHeight(28) # rough equivalent of top button height
+        profile_title.setMinimumHeight(34)
         profile_header_layout.addWidget(profile_title)
         profile_header_layout.addStretch()
-        profile_header_layout.addWidget(QLabel("A Norm"))
+        file_a_norm_label = QLabel("A Norm")
+        file_a_norm_label.setMinimumHeight(34)
+        profile_header_layout.addWidget(file_a_norm_label)
         self.file_a_norm_spin = QDoubleSpinBox()
         self.file_a_norm_spin.setDecimals(3)
         self.file_a_norm_spin.setRange(0.001, 1000.0)
         self.file_a_norm_spin.setSingleStep(0.1)
         self.file_a_norm_spin.setValue(1.0)
-        self.file_a_norm_spin.setFixedWidth(80)
+        self.file_a_norm_spin.setFixedWidth(92)
+        self.file_a_norm_spin.setMinimumHeight(34)
         profile_header_layout.addWidget(self.file_a_norm_spin)
         
         self.profile_canvas = MatplotlibCanvas(self)
@@ -206,37 +232,51 @@ class GammaAnalysisApp(QMainWindow):
         # File B Container (Top)
         self.mcc_canvas = MatplotlibCanvas(self)
         mcc_header_layout = QHBoxLayout()
+        mcc_header_layout.setContentsMargins(0, 0, 0, 0)
+        mcc_header_layout.setSpacing(8)
         self.load_measurement_btn = QPushButton("Load File B")
         self.load_measurement_btn.setObjectName("loadBtn")
+        self.load_measurement_btn.setMinimumHeight(34)
+        self.load_measurement_btn.setMinimumWidth(110)
         self.mcc_label = QLabel("File B: None")
         self.mcc_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.mcc_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.mcc_label.setMinimumHeight(34)
         mcc_header_layout.addWidget(self.load_measurement_btn)
         mcc_header_layout.addWidget(self.mcc_label)
         mcc_header_layout.addStretch()
         
         mcc_container = QWidget()
         mcc_layout = QVBoxLayout(mcc_container)
+        mcc_layout.setContentsMargins(0, 0, 0, 0)
+        mcc_layout.setSpacing(6)
         mcc_layout.addLayout(mcc_header_layout)
         mcc_layout.addWidget(self.mcc_canvas)
         
         # Gamma Map Container (Bottom)
         gamma_container = QWidget()
         gamma_layout = QVBoxLayout(gamma_container)
-        
+        gamma_layout.setContentsMargins(0, 0, 0, 0)
+        gamma_layout.setSpacing(6)
+
         gamma_header_layout = QHBoxLayout()
+        gamma_header_layout.setContentsMargins(0, 0, 0, 0)
+        gamma_header_layout.setSpacing(8)
         gamma_title = QLabel("Gamma Analysis")
         gamma_title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        gamma_title.setMinimumHeight(28) # rough equivalent of top button height
+        gamma_title.setMinimumHeight(34)
         gamma_header_layout.addWidget(gamma_title)
         gamma_header_layout.addStretch()
-        gamma_header_layout.addWidget(QLabel("B Norm"))
+        file_b_norm_label = QLabel("B Norm")
+        file_b_norm_label.setMinimumHeight(34)
+        gamma_header_layout.addWidget(file_b_norm_label)
         self.file_b_norm_spin = QDoubleSpinBox()
         self.file_b_norm_spin.setDecimals(3)
         self.file_b_norm_spin.setRange(0.001, 1000.0)
         self.file_b_norm_spin.setSingleStep(0.1)
         self.file_b_norm_spin.setValue(1.0)
-        self.file_b_norm_spin.setFixedWidth(80)
+        self.file_b_norm_spin.setFixedWidth(92)
+        self.file_b_norm_spin.setMinimumHeight(34)
         gamma_header_layout.addWidget(self.file_b_norm_spin)
         
         self.gamma_canvas = MatplotlibCanvas(self)
@@ -286,16 +326,33 @@ class GammaAnalysisApp(QMainWindow):
         main_layout.addWidget(sidebar)
         main_layout.addWidget(content_widget)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_resize_timer"):
+            self._resize_timer.start(80)
+
+    def _refresh_after_resize(self):
+        if not hasattr(self, "plot_manager"):
+            return
+        self.plot_manager.redraw_all_images()
+        if self.data_manager.profile_line is not None:
+            profile_data = self.plot_manager.generate_profile_data()
+            if profile_data is not None:
+                self.plot_manager.draw_profile(profile_data, self.profile_direction)
+        self.plot_manager.draw_gamma_map()
+
     def connect_signals(self):
         """Connects all UI widget signals to the controller's methods."""
         self.load_dicom_btn.clicked.connect(self.controller.load_dicom_file)
         self.load_measurement_btn.clicked.connect(self.controller.load_measurement_file)
-        self.run_gamma_btn.clicked.connect(self.controller.run_gamma_analysis)
         self.generate_report_btn.clicked.connect(self.controller.generate_report)
         self.close_btn.clicked.connect(self.close)
         
         self.dicom_x_spin.valueChanged.connect(self.controller.update_origin)
         self.dicom_y_spin.valueChanged.connect(self.controller.update_origin)
+        self.dta_spin.valueChanged.connect(self.controller.update_gamma_parameters)
+        self.dd_spin.valueChanged.connect(self.controller.update_gamma_parameters)
+        self.gamma_type_combo.currentTextChanged.connect(lambda _text: self.controller.update_gamma_parameters())
 
         self.vertical_btn.clicked.connect(lambda: self.controller.set_profile_direction("vertical"))
         self.horizontal_btn.clicked.connect(lambda: self.controller.set_profile_direction("horizontal"))
@@ -306,6 +363,8 @@ class GammaAnalysisApp(QMainWindow):
         self.mcc_canvas.mpl_connect('button_press_event', self.controller.on_mcc_click_handler)
 
 if __name__ == "__main__":
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app = QApplication(sys.argv)
     if getattr(sys, 'frozen', False):
         application_path = sys._MEIPASS

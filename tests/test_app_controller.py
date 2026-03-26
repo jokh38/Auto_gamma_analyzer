@@ -225,6 +225,36 @@ class TestAppController(unittest.TestCase):
         self.assertEqual(self.data_manager.file_b_normalization, 1.7)
         file_a_handler.set_normalization_factor.assert_called_once_with(1.1)
         file_b_handler.set_normalization_factor.assert_called_once_with(1.7)
+        self.assertEqual(self.controller.run_gamma_analysis.call_count, 2)
+
+    def test_update_origin_triggers_auto_gamma_when_files_loaded(self):
+        self.data_manager.dicom_data = MagicMock()
+        self.data_manager.initial_dicom_phys_coords = (np.array([0.0]), np.array([0.0]))
+        self.data_manager.file_a_handler = MagicMock()
+        self.data_manager.file_b_handler = MagicMock()
+        self.mock_view.dicom_x_spin.value.return_value = 2.5
+        self.mock_view.dicom_y_spin.value.return_value = -1.5
+
+        self.controller._apply_dicom_shift = MagicMock()
+        self.controller.generate_and_draw_profile = MagicMock()
+        self.controller.run_gamma_analysis = MagicMock()
+        self.plot_manager.redraw_all_images = MagicMock()
+        self.data_manager.profile_line = {"type": "vertical", "x": 0.0}
+
+        self.controller.update_origin()
+
+        self.controller._apply_dicom_shift.assert_called_once_with(2.5, -1.5)
+        self.controller.generate_and_draw_profile.assert_called_once()
+        self.controller.run_gamma_analysis.assert_called_once()
+
+    def test_update_gamma_parameters_triggers_auto_gamma_when_ready(self):
+        self.data_manager.file_a_handler = MagicMock()
+        self.data_manager.file_b_handler = MagicMock()
+        self.controller.run_gamma_analysis = MagicMock()
+
+        self.controller.update_gamma_parameters()
+
+        self.controller.run_gamma_analysis.assert_called_once()
 
     @patch('src.ui_components.draw_image')
     @patch('src.app_controller.load_dcm')

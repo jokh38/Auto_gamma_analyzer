@@ -26,9 +26,16 @@ class AppController:
 
     def _set_file_label(self, label_widget, prefix, filename):
         """Keep file labels from changing splitter widths when long names are loaded."""
-        metrics = label_widget.fontMetrics()
-        available_width = max(label_widget.width(), 220)
-        elided_name = metrics.elidedText(filename, Qt.ElideRight, available_width)
+        try:
+            metrics = label_widget.fontMetrics()
+            width = label_widget.width()
+            available_width = width if isinstance(width, (int, float)) else 220
+            available_width = max(int(available_width), 220)
+            elided_name = metrics.elidedText(filename, Qt.ElideRight, available_width)
+            if not isinstance(elided_name, str):
+                elided_name = filename
+        except Exception:
+            elided_name = filename
         label_widget.setText(f"{prefix}: {elided_name}")
 
     def _apply_handler_normalization(self, handler, factor):
@@ -53,6 +60,22 @@ class AppController:
         self.main_view.generate_report_btn.setEnabled(False)
         self.plot_manager.draw_gamma_map()
 
+    def _can_run_gamma_analysis(self):
+        """Returns whether both files needed for gamma analysis are available."""
+        dm = self.data_manager
+        file_a_handler = dm.file_a_handler or dm.dicom_handler or dm.mcc_handler
+        file_b_handler = dm.file_b_handler or (
+            dm.mcc_handler if dm.mcc_handler is not file_a_handler else dm.dicom_handler
+        )
+        return file_a_handler is not None and file_b_handler is not None
+
+    def _auto_run_gamma_analysis_if_ready(self):
+        """Recompute gamma automatically when both loaded dose files are available."""
+        if self._can_run_gamma_analysis():
+            self.run_gamma_analysis()
+        else:
+            self._clear_gamma_results()
+
     def update_normalization(self, side, factor):
         """Updates the A/B normalization factor and refreshes dependent views."""
         dm = self.data_manager
@@ -69,12 +92,31 @@ class AppController:
         self.plot_manager.redraw_all_images()
         if dm.profile_line is not None:
             self.generate_and_draw_profile()
+        self._auto_run_gamma_analysis_if_ready()
 
-        gamma_was_available = dm.gamma_stats is not None
-        self._clear_gamma_results()
+    def _apply_dicom_shift(self, delta_x_mm, delta_y_mm):
+        """Applies a relative physical shift to the loaded DICOM datasets."""
+        dm = self.data_manager
 
-        if gamma_was_available and dm.file_a_handler and dm.file_b_handler:
-            self.run_gamma_analysis()
+        if dm.dicom_data is not None and dm.initial_dicom_phys_coords is not None:
+            dm.dicom_data.x_coords = dm.initial_dicom_phys_coords[0] + delta_x_mm
+            dm.dicom_data.y_coords = dm.initial_dicom_phys_coords[1] + delta_y_mm
+
+        if (
+            dm.dicom_handler is not None
+            and dm.initial_dicom_handler_meshes is not None
+            and dm.initial_dicom_handler_extent is not None
+        ):
+            base_x_mesh, base_y_mesh = dm.initial_dicom_handler_meshes
+            dm.dicom_handler.phys_x_mesh = base_x_mesh + delta_x_mm
+            dm.dicom_handler.phys_y_mesh = base_y_mesh + delta_y_mm
+            min_x, max_x, min_y, max_y = dm.initial_dicom_handler_extent
+            dm.dicom_handler.physical_extent = [
+                min_x + delta_x_mm,
+                max_x + delta_x_mm,
+                min_y + delta_y_mm,
+                max_y + delta_y_mm,
+            ]
 
     def run_gamma_analysis(self):
         """
@@ -85,7 +127,11 @@ class AppController:
         view = self.main_view
 
         # Check if both files are loaded
-        if not dm.file_a_handler or not dm.file_b_handler:
+        file_a_handler = dm.file_a_handler or dm.dicom_handler or dm.mcc_handler
+        file_b_handler = dm.file_b_handler or (
+            dm.mcc_handler if dm.mcc_handler is not file_a_handler else dm.dicom_handler
+        )
+        if not file_a_handler or not file_b_handler:
             QMessageBox.warning(view, "Warning", "Both File A and File B must be loaded before running gamma analysis.")
             return
 
@@ -97,21 +143,21 @@ class AppController:
             # Determine reference and evaluation handlers
             # Priority: MCC as reference (measurement), DICOM as evaluation (plan)
             # If both are same type, File B is reference, File A is evaluation
-            file_a_is_mcc = isinstance(dm.file_a_handler, MCCFileHandler)
-            file_b_is_mcc = isinstance(dm.file_b_handler, MCCFileHandler)
+            file_a_is_mcc = isinstance(file_a_handler, MCCFileHandler)
+            file_b_is_mcc = isinstance(file_b_handler, MCCFileHandler)
 
             if file_b_is_mcc and not file_a_is_mcc:
                 # Standard case: File B (MCC) is reference, File A (DICOM) is evaluation
-                reference_handler = dm.file_b_handler
-                evaluation_handler = dm.file_a_handler
+                reference_handler = file_b_handler
+                evaluation_handler = file_a_handler
             elif file_a_is_mcc and not file_b_is_mcc:
                 # Reversed case: File A (MCC) is reference, File B (DICOM) is evaluation
-                reference_handler = dm.file_a_handler
-                evaluation_handler = dm.file_b_handler
+                reference_handler = file_a_handler
+                evaluation_handler = file_b_handler
             else:
                 # Both are same type: File B is reference, File A is evaluation
-                reference_handler = dm.file_b_handler
-                evaluation_handler = dm.file_a_handler
+                reference_handler = file_b_handler
+                evaluation_handler = file_a_handler
 
             results = perform_gamma_analysis(
                 reference_handler=reference_handler,
@@ -141,6 +187,8 @@ class AppController:
                 dm.dicom_handler = dm.file_b_handler
 
             self.plot_manager.draw_gamma_map()
+            if dm.profile_line is not None:
+                self.generate_and_draw_profile()
 
             if 'pass_rate' in dm.gamma_stats:
                 view.generate_report_btn.setEnabled(True)
@@ -228,6 +276,17 @@ class AppController:
 
             success, error_msg = handler.open_file(filename)
             if not success:
+                if file_type == "DICOM":
+                    dicom_data = load_dcm(filename)
+                    self.data_manager.dicom_data = dicom_data
+                    self.data_manager.dicom_roi = self._extract_roi_from_data(dicom_data)
+                    self.plot_manager.redraw_all_images()
+                    self._set_file_label(
+                        self.main_view.dicom_label,
+                        f"File A ({file_type})",
+                        os.path.basename(filename)
+                    )
+                    return
                 raise Exception(error_msg)
 
             # Store handler in data manager
@@ -235,20 +294,25 @@ class AppController:
             self._apply_handler_normalization(handler, self.data_manager.file_a_normalization)
 
             # For backward compatibility with existing code
-            if isinstance(handler, DicomFileHandler):
+            if file_type == "DICOM":
                 self.data_manager.dicom_handler = handler
                 dicom_data = load_dcm(filename)
                 self.data_manager.dicom_data = dicom_data
                 self.data_manager.dicom_roi = self._extract_roi_from_data(dicom_data)
                 self.data_manager.initial_dicom_phys_coords = (dicom_data.x_coords.copy(), dicom_data.y_coords.copy())
-                pos_x, pos_y, _ = dicom_data.metadata['image_position_patient']
+                self.data_manager.initial_dicom_handler_meshes = (
+                    handler.phys_x_mesh.copy(),
+                    handler.phys_y_mesh.copy(),
+                )
+                self.data_manager.initial_dicom_handler_extent = list(handler.get_physical_extent())
+                pos_x, _, pos_z = dicom_data.metadata['image_position_patient']
                 spacing_x, spacing_y = dicom_data.metadata['pixel_spacing']
+                self.data_manager.initial_dicom_origin_mm = (float(pos_x), float(pos_z))
                 pixel_origin_x = int(round(pos_x / spacing_x))
-                pixel_origin_y = int(round(pos_y / spacing_y))
+                pixel_origin_y = int(round(pos_z / spacing_y))
                 self.data_manager.initial_dicom_pixel_origin = (pixel_origin_x, pixel_origin_y)
-                self.main_view.dicom_x_spin.setValue(pixel_origin_x)
-                self.main_view.dicom_y_spin.setValue(pixel_origin_y)
-                self.main_view.origin_label.setText(f"Origin: ({pos_x:.2f}, {pos_y:.2f}) mm")
+                self.main_view.dicom_x_spin.setValue(0.0)
+                self.main_view.dicom_y_spin.setValue(0.0)
 
             self.plot_manager.redraw_all_images()
             self._set_file_label(
@@ -257,12 +321,13 @@ class AppController:
                 os.path.basename(filename)
             )
 
-            if isinstance(handler, MCCFileHandler):
+            if file_type == "MCC":
                 self.main_view.device_label.setText(f"Device Type: {handler.get_device_name()}")
 
             # Auto-generate profile if both files are loaded
             if self.data_manager.file_b_handler is not None:
                 self.set_default_profile_and_generate()
+                self._auto_run_gamma_analysis_if_ready()
 
         except Exception as e:
             QMessageBox.critical(self.main_view, "Error", f"Failed to load File A: {e}")
@@ -297,6 +362,17 @@ class AppController:
 
             success, error_msg = handler.open_file(filename)
             if not success:
+                if file_type == "MCC":
+                    mcc_data = load_mcc(filename)
+                    self.data_manager.mcc_data = mcc_data
+                    self.data_manager.mcc_roi = self._extract_roi_from_data(mcc_data)
+                    self.plot_manager.redraw_all_images()
+                    self._set_file_label(
+                        self.main_view.mcc_label,
+                        f"File B ({file_type})",
+                        os.path.basename(filename)
+                    )
+                    return
                 raise Exception(error_msg)
 
             # Store handler in data manager
@@ -310,7 +386,7 @@ class AppController:
 
             # For backward compatibility with existing code
             # Use load_mcc() as the primary loader for standardized data processing
-            if isinstance(handler, MCCFileHandler):
+            if file_type == "MCC":
                 self.data_manager.mcc_handler = handler  # Keep handler for legacy methods
                 mcc_data = load_mcc(filename)  # Primary loader with standardized interpolation (fill_value=0.0)
                 self.data_manager.mcc_data = mcc_data
@@ -327,6 +403,7 @@ class AppController:
             # Auto-generate profile if both files are loaded
             if self.data_manager.file_a_handler is not None:
                 self.set_default_profile_and_generate()
+                self._auto_run_gamma_analysis_if_ready()
 
         except Exception as e:
             QMessageBox.critical(self.main_view, "Error", f"Failed to load File B: {e}")
@@ -343,25 +420,34 @@ class AppController:
 
     def update_origin(self):
         dm = self.data_manager
-        if not dm.dicom_data or not dm.initial_dicom_phys_coords: return
-        spacing_x, spacing_y = dm.dicom_data.metadata['pixel_spacing']
-        pixel_offset_x = self.main_view.dicom_x_spin.value() - dm.initial_dicom_pixel_origin[0]
-        pixel_offset_y = self.main_view.dicom_y_spin.value() - dm.initial_dicom_pixel_origin[1]
-        phys_offset_x = pixel_offset_x * spacing_x
-        phys_offset_y = pixel_offset_y * spacing_y
-        dm.dicom_data.x_coords = dm.initial_dicom_phys_coords[0] + phys_offset_x
-        dm.dicom_data.y_coords = dm.initial_dicom_phys_coords[1] + phys_offset_y
+        if not dm.dicom_data or not dm.initial_dicom_phys_coords:
+            return
+
+        delta_x_mm = float(self.main_view.dicom_x_spin.value())
+        delta_y_mm = float(self.main_view.dicom_y_spin.value())
+        self._apply_dicom_shift(delta_x_mm, delta_y_mm)
+
         self.plot_manager.redraw_all_images()
-        self.generate_and_draw_profile()
+        if dm.profile_line is not None:
+            self.generate_and_draw_profile()
+        self._auto_run_gamma_analysis_if_ready()
+
+    def update_gamma_parameters(self):
+        """Refresh gamma analysis after any criterion change."""
+        self._auto_run_gamma_analysis_if_ready()
 
     def set_profile_direction(self, direction):
         self.main_view.profile_direction = direction
         self.main_view.vertical_btn.setChecked(direction == "vertical")
         self.main_view.horizontal_btn.setChecked(direction == "horizontal")
+        if self.plot_manager.profile_table is not None:
+            self.plot_manager.profile_table.set_profile_direction(direction)
         if self.data_manager.dicom_data:
             dm = self.data_manager
             dm.profile_line = {"type": direction, "x": 0} if direction == "vertical" else {"type": "horizontal", "y": 0}
             self.plot_manager.redraw_all_images()
+            if dm.gamma_stats is not None:
+                self.plot_manager.draw_gamma_map()
             self.generate_and_draw_profile()
 
     def on_dicom_click_handler(self, event):
