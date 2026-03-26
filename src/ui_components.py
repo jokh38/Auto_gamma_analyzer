@@ -7,7 +7,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, LinearSegmentedColormap, TwoSlopeNorm
 
 class MatplotlibCanvas(FigureCanvas):
     """Matplotlib 캔버스 위젯"""
@@ -364,16 +364,47 @@ class PlotManager:
             )
 
     def draw_gamma_map(self):
-        """Draws the gamma map on the gamma canvas using interpolated data for smooth visualization."""
+        """Draws the gamma map with pass values in blue/green and failing values in red."""
         dm = self.data_manager
         if dm.gamma_stats and 'pass_rate' in dm.gamma_stats:
-            # Use interpolated gamma map if available for smooth visualization
             gamma_data = dm.gamma_map_interp if dm.gamma_map_interp is not None else dm.gamma_map
-            draw_image(
-                canvas=self.gamma_canvas, image_data=gamma_data, extent=dm.phys_extent,
-                title=f'Gamma Analysis: Pass Rate = {dm.gamma_stats["pass_rate"]:.2f}%',
-                colorbar_label='Gamma Index', show_origin=True, show_colorbar=True
+            self.gamma_canvas.fig.clear()
+            self.gamma_canvas.axes = self.gamma_canvas.fig.add_subplot(111)
+
+            gamma_display = np.array(gamma_data, dtype=float, copy=True)
+            gamma_display[~np.isfinite(gamma_display)] = np.nan
+
+            cmap = LinearSegmentedColormap.from_list(
+                "gamma_pass_fail",
+                [
+                    (0.0, "#153b8a"),
+                    (0.35, "#1fa3c8"),
+                    (0.499, "#35b779"),
+                    (0.5, "#fee08b"),
+                    (0.72, "#f46d43"),
+                    (1.0, "#b2182b"),
+                ],
             )
+            cmap.set_bad(color="#1e1e1e")
+
+            finite_values = gamma_display[np.isfinite(gamma_display)]
+            max_gamma = float(np.nanmax(finite_values)) if finite_values.size else 2.0
+            norm = TwoSlopeNorm(vmin=0.0, vcenter=1.0, vmax=max(2.0, max_gamma))
+
+            im = self.gamma_canvas.axes.imshow(
+                gamma_display,
+                cmap=cmap,
+                norm=norm,
+                extent=dm.phys_extent,
+                origin='upper'
+            )
+            self.gamma_canvas.fig.colorbar(im, ax=self.gamma_canvas.axes, label='Gamma Index')
+            self.gamma_canvas.axes.plot(0, 0, 'wo', markersize=3, markeredgecolor='black')
+            self.gamma_canvas.axes.set_title(
+                f'Gamma Analysis: Pass Rate = {dm.gamma_stats["pass_rate"]:.2f}%'
+            )
+            self.gamma_canvas.fig.tight_layout()
+            self.gamma_canvas.draw()
         else:
             # Clear the canvas if there's no data
             self.gamma_canvas.fig.clear()
@@ -381,23 +412,28 @@ class PlotManager:
             self.gamma_canvas.axes.set_title("Gamma Analysis")
             self.gamma_canvas.draw()
 
-    def handle_dicom_click(self, event, profile_direction):
+    def handle_image_click(self, event, profile_direction, source="A"):
         """
-        Handles the logic for a click event on the DICOM canvas.
+        Handles the logic for a click event on the File A or File B canvas.
         This will be called by the AppController.
         Snaps the clicked position to File B resolution if available.
         """
         dm = self.data_manager
-        # Check if File A is loaded (new approach) or dicom_data exists (legacy)
-        if event.inaxes != self.dicom_canvas.axes:
+        source_canvas = self.dicom_canvas if source == "A" else self.mcc_canvas
+        source_handler = dm.file_a_handler if source == "A" else dm.file_b_handler
+        legacy_data = dm.dicom_data if source == "A" else dm.mcc_data
+
+        if event.inaxes != source_canvas.axes:
             return False
-        if not dm.file_a_handler and not dm.dicom_data:
+        if not source_handler and legacy_data is None:
+            return False
+        if event.xdata is None or event.ydata is None:
             return False
 
         phys_x, phys_y = event.xdata, event.ydata
 
-        # Snap to File B resolution if available (File B typically has lower resolution like MCC)
-        # First try file_b_handler, then fall back to mcc_handler for backward compatibility
+        # Snap to File B resolution if available so the profile line stays aligned
+        # with the measurement/reference grid used throughout the application.
         spacing_handler = dm.file_b_handler if dm.file_b_handler else dm.mcc_handler
 
         if spacing_handler:

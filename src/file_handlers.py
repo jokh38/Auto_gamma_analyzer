@@ -16,6 +16,7 @@ class BaseFileHandler:
         """Initializes the BaseFileHandler and loads configuration from config.yaml."""
         self.filename = None
         self.pixel_data = None
+        self.normalization_factor = 1.0
         self.phys_x_mesh = None
         self.phys_y_mesh = None
         self.physical_extent = None
@@ -67,7 +68,17 @@ class BaseFileHandler:
 
     def get_pixel_data(self):
         """Returns the pixel data."""
+        if self.pixel_data is None:
+            return None
+        return self.pixel_data * self.normalization_factor
+
+    def get_raw_pixel_data(self):
+        """Returns the unscaled pixel data."""
         return self.pixel_data
+
+    def set_normalization_factor(self, factor):
+        """Sets the multiplicative normalization factor for this dataset."""
+        self.normalization_factor = float(factor)
 
     def create_physical_coordinates_dcm(self):
         """Creates the physical coordinate system (abstract method)."""
@@ -375,7 +386,9 @@ class MCCFileHandler(BaseFileHandler):
 
     def get_matrix_data(self):
         """Returns the raw MCC matrix data."""
-        return self.matrix_data
+        if self.matrix_data is None:
+            return None
+        return self.matrix_data * self.normalization_factor
 
     def get_interpolated_matrix_data(self, method='cubic'):
         """

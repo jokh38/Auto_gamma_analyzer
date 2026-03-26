@@ -13,6 +13,7 @@ from src.load_mcc import load_mcc
 from unittest.mock import Mock, MagicMock, patch
 from src.app_controller import AppController
 from src.standard_data_model import StandardDoseData, ROI_Data
+from src.file_handlers import DicomFileHandler, MCCFileHandler
 
 # The temporary AppController is no longer needed.
 
@@ -174,8 +175,6 @@ class TestAppController(unittest.TestCase):
         Tests that AppController correctly runs gamma analysis using handlers.
         """
         # Given: Create handlers for DICOM and MCC data
-        from src.file_handlers import DicomFileHandler, MCCFileHandler
-
         dicom_handler = DicomFileHandler()
         dicom_handler.open_file('example_data/1G240_2cm.dcm')
         self.data_manager.dicom_handler = dicom_handler
@@ -207,6 +206,25 @@ class TestAppController(unittest.TestCase):
 
         self.assertIsNotNone(self.data_manager.gamma_map, "gamma_map should be populated.")
         self.assertIsInstance(self.data_manager.gamma_map, np.ndarray)
+
+    def test_update_normalization_applies_to_loaded_handlers(self):
+        file_a_handler = MagicMock()
+        file_b_handler = MagicMock()
+        self.data_manager.file_a_handler = file_a_handler
+        self.data_manager.file_b_handler = file_b_handler
+
+        self.controller.generate_and_draw_profile = MagicMock()
+        self.controller.run_gamma_analysis = MagicMock()
+        self.plot_manager.redraw_all_images = MagicMock()
+        self.plot_manager.draw_gamma_map = MagicMock()
+
+        self.controller.update_normalization("A", 1.1)
+        self.controller.update_normalization("B", 1.7)
+
+        self.assertEqual(self.data_manager.file_a_normalization, 1.1)
+        self.assertEqual(self.data_manager.file_b_normalization, 1.7)
+        file_a_handler.set_normalization_factor.assert_called_once_with(1.1)
+        file_b_handler.set_normalization_factor.assert_called_once_with(1.7)
 
     @patch('src.ui_components.draw_image')
     @patch('src.app_controller.load_dcm')

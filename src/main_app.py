@@ -7,7 +7,7 @@ from matplotlib.colors import Normalize
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
-                             QSpinBox, QComboBox, QGridLayout, 
+                             QSpinBox, QDoubleSpinBox, QComboBox, QGridLayout, 
                              QScrollArea, QGroupBox, QMessageBox, QSplitter, QFrame,
                              QSizePolicy)
 from PyQt5.QtCore import Qt
@@ -182,6 +182,14 @@ class GammaAnalysisApp(QMainWindow):
         profile_title.setMinimumHeight(28) # rough equivalent of top button height
         profile_header_layout.addWidget(profile_title)
         profile_header_layout.addStretch()
+        profile_header_layout.addWidget(QLabel("A Norm"))
+        self.file_a_norm_spin = QDoubleSpinBox()
+        self.file_a_norm_spin.setDecimals(3)
+        self.file_a_norm_spin.setRange(0.001, 1000.0)
+        self.file_a_norm_spin.setSingleStep(0.1)
+        self.file_a_norm_spin.setValue(1.0)
+        self.file_a_norm_spin.setFixedWidth(80)
+        profile_header_layout.addWidget(self.file_a_norm_spin)
         
         self.profile_canvas = MatplotlibCanvas(self)
         profile_layout.addLayout(profile_header_layout)
@@ -222,6 +230,14 @@ class GammaAnalysisApp(QMainWindow):
         gamma_title.setMinimumHeight(28) # rough equivalent of top button height
         gamma_header_layout.addWidget(gamma_title)
         gamma_header_layout.addStretch()
+        gamma_header_layout.addWidget(QLabel("B Norm"))
+        self.file_b_norm_spin = QDoubleSpinBox()
+        self.file_b_norm_spin.setDecimals(3)
+        self.file_b_norm_spin.setRange(0.001, 1000.0)
+        self.file_b_norm_spin.setSingleStep(0.1)
+        self.file_b_norm_spin.setValue(1.0)
+        self.file_b_norm_spin.setFixedWidth(80)
+        gamma_header_layout.addWidget(self.file_b_norm_spin)
         
         self.gamma_canvas = MatplotlibCanvas(self)
         gamma_layout.addLayout(gamma_header_layout)
@@ -283,8 +299,11 @@ class GammaAnalysisApp(QMainWindow):
 
         self.vertical_btn.clicked.connect(lambda: self.controller.set_profile_direction("vertical"))
         self.horizontal_btn.clicked.connect(lambda: self.controller.set_profile_direction("horizontal"))
+        self.file_a_norm_spin.valueChanged.connect(lambda value: self.controller.update_normalization("A", value))
+        self.file_b_norm_spin.valueChanged.connect(lambda value: self.controller.update_normalization("B", value))
 
         self.dicom_canvas.mpl_connect('button_press_event', self.controller.on_dicom_click_handler)
+        self.mcc_canvas.mpl_connect('button_press_event', self.controller.on_mcc_click_handler)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

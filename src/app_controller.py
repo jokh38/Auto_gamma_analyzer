@@ -31,6 +31,51 @@ class AppController:
         elided_name = metrics.elidedText(filename, Qt.ElideRight, available_width)
         label_widget.setText(f"{prefix}: {elided_name}")
 
+    def _apply_handler_normalization(self, handler, factor):
+        """Applies the current normalization factor to a loaded handler."""
+        if handler and hasattr(handler, "set_normalization_factor"):
+            handler.set_normalization_factor(factor)
+
+    def _clear_gamma_results(self):
+        """Clears gamma outputs when upstream dose data changes."""
+        dm = self.data_manager
+        dm.gamma_map = None
+        dm.gamma_stats = None
+        dm.phys_extent = None
+        dm.mcc_interp_data = None
+        dm.dd_map = None
+        dm.dta_map = None
+        dm.dd_stats = None
+        dm.dta_stats = None
+        dm.gamma_map_interp = None
+        dm.dd_map_interp = None
+        dm.dta_map_interp = None
+        self.main_view.generate_report_btn.setEnabled(False)
+        self.plot_manager.draw_gamma_map()
+
+    def update_normalization(self, side, factor):
+        """Updates the A/B normalization factor and refreshes dependent views."""
+        dm = self.data_manager
+
+        if side == "A":
+            dm.file_a_normalization = float(factor)
+            self._apply_handler_normalization(dm.file_a_handler, dm.file_a_normalization)
+        elif side == "B":
+            dm.file_b_normalization = float(factor)
+            self._apply_handler_normalization(dm.file_b_handler, dm.file_b_normalization)
+        else:
+            raise ValueError(f"Unsupported normalization side: {side}")
+
+        self.plot_manager.redraw_all_images()
+        if dm.profile_line is not None:
+            self.generate_and_draw_profile()
+
+        gamma_was_available = dm.gamma_stats is not None
+        self._clear_gamma_results()
+
+        if gamma_was_available and dm.file_a_handler and dm.file_b_handler:
+            self.run_gamma_analysis()
+
     def run_gamma_analysis(self):
         """
         Executes the gamma analysis using parameters from the UI.
@@ -73,7 +118,8 @@ class AppController:
                 evaluation_handler=evaluation_handler,
                 dose_percent_threshold=dd,
                 distance_mm_threshold=dta,
-                global_normalisation=is_global
+                global_normalisation=is_global,
+                threshold=getattr(reference_handler, "suppression_level", 10)
             )
             (
                 dm.gamma_map, dm.gamma_stats, dm.phys_extent, dm.mcc_interp_data,
@@ -186,6 +232,7 @@ class AppController:
 
             # Store handler in data manager
             self.data_manager.file_a_handler = handler
+            self._apply_handler_normalization(handler, self.data_manager.file_a_normalization)
 
             # For backward compatibility with existing code
             if isinstance(handler, DicomFileHandler):
@@ -254,6 +301,7 @@ class AppController:
 
             # Store handler in data manager
             self.data_manager.file_b_handler = handler
+            self._apply_handler_normalization(handler, self.data_manager.file_b_normalization)
 
             # Crop to match File A bounds when the File B handler supports it.
             if self.data_manager.file_a_handler and hasattr(self.data_manager.file_a_handler, 'dose_bounds'):
@@ -317,7 +365,10 @@ class AppController:
             self.generate_and_draw_profile()
 
     def on_dicom_click_handler(self, event):
-        self.plot_manager.handle_dicom_click(event, self.main_view.profile_direction)
+        self.plot_manager.handle_image_click(event, self.main_view.profile_direction, source="A")
+
+    def on_mcc_click_handler(self, event):
+        self.plot_manager.handle_image_click(event, self.main_view.profile_direction, source="B")
 
     def generate_and_draw_profile(self):
         try:

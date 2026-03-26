@@ -31,6 +31,8 @@ class DataManager:
         # Profile-related data
         self.profile_line: Optional[Dict[str, Any]] = None
         self.current_profile_data: Optional[Dict[str, Any]] = None
+        self.file_a_normalization: float = 1.0
+        self.file_b_normalization: float = 1.0
 
         # Gamma analysis results
         self.gamma_map: Optional[np.ndarray] = None

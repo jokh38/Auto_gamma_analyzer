@@ -12,13 +12,17 @@ from src.analysis import extract_profile_data, perform_gamma_analysis
 class DenseHandler:
     def __init__(self, data, x_coords, y_coords):
         self.pixel_data = np.array(data, dtype=float)
+        self.normalization_factor = 1.0
         self.phys_x_mesh, self.phys_y_mesh = np.meshgrid(x_coords, y_coords)
         self.physical_extent = [float(np.min(x_coords)), float(np.max(x_coords)), float(np.min(y_coords)), float(np.max(y_coords))]
         self.filename = "dense.dcm"
         self.crop_pixel_offset = (0, 0)
 
     def get_pixel_data(self):
-        return self.pixel_data
+        return self.pixel_data * self.normalization_factor
+
+    def set_normalization_factor(self, factor):
+        self.normalization_factor = float(factor)
 
     def get_physical_extent(self):
         return self.physical_extent
@@ -31,7 +35,7 @@ class SparseHandler(DenseHandler):
         self.filename = "sparse.mcc"
 
     def get_matrix_data(self):
-        return self.matrix_data
+        return self.matrix_data * self.normalization_factor
 
 
 class TestAnalysisFunctions(unittest.TestCase):
@@ -132,6 +136,34 @@ class TestAnalysisFunctions(unittest.TestCase):
         self.assertGreater(stats["mean"], 0.0)
         self.assertGreater(dd_stats["total_points"], 0)
         self.assertGreater(dta_stats["total_points"], 0)
+
+    def test_extract_profile_data_applies_normalization_factors(self):
+        x_coords = np.array([0.0, 10.0, 20.0])
+        y_coords = np.array([20.0, 10.0, 0.0])
+
+        file_a = DenseHandler(
+            data=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+            x_coords=x_coords,
+            y_coords=y_coords,
+        )
+        file_b = SparseHandler(
+            data=[[2, -1, 4], [5, 6, -1], [8, 9, 10]],
+            x_coords=x_coords,
+            y_coords=y_coords,
+        )
+        file_a.set_normalization_factor(1.1)
+        file_b.set_normalization_factor(1.7)
+
+        profile = extract_profile_data(
+            direction="horizontal",
+            fixed_position=10.0,
+            dicom_handler=file_a,
+            mcc_handler=file_b,
+        )
+
+        np.testing.assert_allclose(profile["dicom_values"], np.array([4.4, 5.5, 6.6]))
+        np.testing.assert_allclose(profile["mcc_values"], np.array([8.5, 10.2]))
+        np.testing.assert_allclose(profile["dicom_at_mcc"], np.array([4.4, 5.5]))
 
 
 if __name__ == "__main__":
