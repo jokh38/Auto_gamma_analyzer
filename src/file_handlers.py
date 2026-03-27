@@ -3,12 +3,11 @@ This module provides classes for handling DICOM and MCC files.
 """
 import os
 import numpy as np
-import yaml
 import sys
 import csv
 import pydicom
 from scipy.interpolate import griddata
-from src.utils import logger
+from src.utils import logger, load_app_config, get_config_fill_value
 
 class BaseFileHandler:
     """Base class for various file handlers."""
@@ -26,27 +25,12 @@ class BaseFileHandler:
         self.dose_bounds = None
         self.crop_pixel_offset = (0, 0)
 
-        # Load configuration
-        try:
-            with open("config.yaml", "r") as f:
-                config = yaml.safe_load(f)
-            self.dta = config.get("dta", 3)
-            self.dd = config.get("dd", 3)
-            self.suppression_level = config.get("suppression_level", 10)
-            self.roi_margin = config.get("roi_margin", 2)
-            logger.info(f"Loaded configuration: dta={self.dta}, dd={self.dd}, suppression_level={self.suppression_level}, roi_margin={self.roi_margin}")
-        except FileNotFoundError:
-            logger.warning("config.yaml not found. Using default values.")
-            self.dta = 3
-            self.dd = 3
-            self.suppression_level = 10
-            self.roi_margin = 2
-        except yaml.YAMLError as e:
-            logger.error(f"Error: Could not parse config.yaml. Please check its format: {e}")
-            self.dta = 3
-            self.dd = 3
-            self.suppression_level = 10
-            self.roi_margin = 2
+        config = load_app_config()
+        self.dta = config["dta"]
+        self.dd = config["dd"]
+        self.suppression_level = config["suppression_level"]
+        self.roi_margin = config["roi_margin"]
+        self.roi_threshold_percent = config["roi_threshold_percent"]
 
     def get_filename(self):
         """Returns the filename."""
@@ -254,7 +238,10 @@ class DicomFileHandler(BaseFileHandler):
             full_phys_y_mesh = self.phys_y_mesh
 
             # Auto-crop ROI to area with >1% of max dose + 2cm margin
-            self.dose_bounds = self.calculate_dose_bounds(threshold_percent=1, margin_mm=self.roi_margin)
+            self.dose_bounds = self.calculate_dose_bounds(
+                threshold_percent=self.roi_threshold_percent,
+                margin_mm=self.roi_margin,
+            )
 
             if self.dose_bounds:
                 bounds = self.dose_bounds
@@ -406,12 +393,13 @@ class MCCFileHandler(BaseFileHandler):
         valid_points_indices = np.where(~np.isnan(data))
         if len(valid_points_indices[0]) < 4: return self.matrix_data
         grid_y, grid_x = np.mgrid[0:data.shape[0], 0:data.shape[1]]
+        config = load_app_config()
         interpolated_data = griddata(
             np.array(list(zip(valid_points_indices[0], valid_points_indices[1]))),
             data[valid_points_indices],
             (grid_y, grid_x),
             method=method,
-            fill_value=0.0
+            fill_value=get_config_fill_value(config["mcc_fill_value_type"])
         )
         return interpolated_data
 

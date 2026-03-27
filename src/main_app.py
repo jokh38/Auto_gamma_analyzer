@@ -17,6 +17,7 @@ from src.data_manager import DataManager
 from src.ui_components import MatplotlibCanvas, ProfileDataTable, PlotManager
 from src.app_controller import AppController
 from src.styles import DARK_THEME_QSS
+from src.utils import load_app_config
 from src.app_controller import AppController
 
 class GammaAnalysisApp(QMainWindow):
@@ -29,6 +30,7 @@ class GammaAnalysisApp(QMainWindow):
     """
     def __init__(self):
         super().__init__()
+        self.app_config = load_app_config()
         
         # The view only holds the state of UI elements, not application data.
         self.profile_direction = "vertical"
@@ -110,10 +112,10 @@ class GammaAnalysisApp(QMainWindow):
         gamma_layout = QGridLayout(gamma_group)
         self.dta_spin = QSpinBox()
         self.dta_spin.setRange(1, 10)
-        self.dta_spin.setValue(3)
+        self.dta_spin.setValue(int(self.app_config["dta"]))
         self.dd_spin = QSpinBox()
         self.dd_spin.setRange(1, 10)
-        self.dd_spin.setValue(3)
+        self.dd_spin.setValue(int(self.app_config["dd"]))
         self.gamma_type_combo = QComboBox()
         self.gamma_type_combo.addItems(["Global", "Local"])
         gamma_layout.addWidget(QLabel("DTA (mm):"), 0, 0)

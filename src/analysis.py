@@ -6,9 +6,14 @@ including profile extraction and gamma analysis.
 import numpy as np
 from scipy.interpolate import griddata
 from scipy.ndimage import gaussian_filter
-from src.utils import logger, find_nearest_index, save_map_to_csv
+from src.utils import (
+    logger,
+    find_nearest_index,
+    save_map_to_csv,
+    load_app_config,
+    get_config_fill_value,
+)
 import os
-import yaml
 
 def _get_handler_grid(handler):
     """Returns the handler's native data grid and its valid-data mask."""
@@ -209,6 +214,9 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
         phys_y_dicom = dicom_phys_y_mesh[:, 0]  # y coordinates
         phys_extent = reference_handler.get_physical_extent()
 
+        config = load_app_config()
+        fill_value = get_config_fill_value(config["fill_value_type"])
+
         # If no points are left after filtering, return early.
         if not np.any(analysis_mask):
             logger.warning(f"No reference data points above the {threshold}% dose threshold ({threshold_dose:.2f} Gy). Gamma analysis will be skipped.")
@@ -218,7 +226,7 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
             mcc_interp_data = griddata(
                 all_mcc_coords_phys, all_mcc_dose_values,
                 (dicom_phys_x_mesh, dicom_phys_y_mesh),
-                method='linear', fill_value=0
+                method=config["interpolation_method"], fill_value=fill_value
             )
             # Return empty dd and dta maps when no analysis is performed
             dd_map_empty = np.full_like(reference_grid, np.nan)
@@ -363,20 +371,9 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
         # Extract physical coordinates of analyzed points for interpolation
         analyzed_coords_phys = points_ref  # These are the physical coordinates of analyzed points
 
-        # Load interpolation settings from config
-        try:
-            with open("config.yaml", "r") as f:
-                config = yaml.safe_load(f)
-            interpolation_method = config.get("interpolation_method", "cubic")
-            smoothing_factor = config.get("smoothing_factor", 1.0)
-            fill_value_type = config.get("fill_value_type", "zero")  # "zero" or "nan"
-        except:
-            interpolation_method = "cubic"
-            smoothing_factor = 1.0
-            fill_value_type = "zero"
-
-        # Set fill value based on config
-        fill_value = 0 if fill_value_type == "zero" else np.nan
+        interpolation_method = config["interpolation_method"]
+        smoothing_factor = config["smoothing_factor"]
+        fill_value_type = config["fill_value_type"]
 
         # Interpolate gamma map to DICOM grid with improved method
         gamma_map_interp = griddata(

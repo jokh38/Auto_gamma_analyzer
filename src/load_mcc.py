@@ -7,7 +7,7 @@ import numpy as np
 from scipy.interpolate import griddata
 
 from .standard_data_model import StandardDoseData
-from .utils import logger
+from .utils import logger, load_app_config, get_config_fill_value
 
 # Helper functions for MCC loading
 def _detect_mcc_device_type(content: str) -> tuple[int, int]:
@@ -127,8 +127,14 @@ def load_mcc(filename: str, target_resolution: float = 2.0) -> StandardDoseData:
 
         grid_x, grid_y = np.meshgrid(x_coords_new, y_coords_new)
 
-        # Perform interpolation
-        data_grid = griddata(phys_points, valid_values, (grid_x, grid_y), method='cubic', fill_value=0.0)
+        config = load_app_config()
+        data_grid = griddata(
+            phys_points,
+            valid_values,
+            (grid_x, grid_y),
+            method=config["mcc_interpolation_method"],
+            fill_value=get_config_fill_value(config["mcc_fill_value_type"]),
+        )
 
         # 4. Extract metadata
         device_name = "OCTAVIUS " + ("1500" if device_type == 2 else "729")

@@ -9,3 +9,10 @@ csv_export_path: "csv_exports"
 interpolation_method: "cubic"  # Options: "linear", "cubic", "nearest"
 smoothing_factor: 1.0          # Gaussian smoothing intensity (0 = no smoothing)
 fill_value_type: "zero"        # Options: "zero" (fills with 0), "nan" (fills with NaN)
+
+# Optional MCC interpolation settings
+mcc_interpolation_method: "cubic"  # Options: "linear", "cubic", "nearest"
+mcc_fill_value_type: "zero"        # Options: "zero", "nan"
+
+# Optional ROI auto-crop threshold for DICOM loading
+roi_threshold_percent: 1

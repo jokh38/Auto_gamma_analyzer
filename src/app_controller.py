@@ -5,7 +5,7 @@ from PyQt5.QtCore import Qt
 
 from src.data_manager import DataManager
 from src.ui_components import PlotManager
-from src.utils import logger
+from src.utils import logger, load_app_config
 from src.load_dcm import load_dcm
 from src.load_mcc import load_mcc
 from src.file_handlers import DicomFileHandler, MCCFileHandler
@@ -23,6 +23,7 @@ class AppController:
         self.main_view = main_view
         self.data_manager = data_manager
         self.plot_manager = plot_manager
+        self.app_config = load_app_config()
 
     def _set_file_label(self, label_widget, prefix, filename):
         """Keep file labels from changing splitter widths when long names are loaded."""
@@ -165,7 +166,9 @@ class AppController:
                 dose_percent_threshold=dd,
                 distance_mm_threshold=dta,
                 global_normalisation=is_global,
-                threshold=getattr(reference_handler, "suppression_level", 10)
+                threshold=getattr(reference_handler, "suppression_level", 10),
+                save_csv=self.app_config["save_csv"],
+                csv_dir=self.app_config["csv_export_path"],
             )
             (
                 dm.gamma_map, dm.gamma_stats, dm.phys_extent, dm.mcc_interp_data,
@@ -505,7 +508,7 @@ class AppController:
                 gamma_stats=dm.gamma_stats,
                 dta=self.main_view.dta_spin.value(),
                 dd=self.main_view.dd_spin.value(),
-                suppression_level=10,
+                suppression_level=getattr(dm.file_b_handler, "suppression_level", self.app_config["suppression_level"]),
                 ver_profile_data=ver_profile,
                 hor_profile_data=hor_profile,
                 mcc_interp_data=dm.mcc_interp_data,

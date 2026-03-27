@@ -6,6 +6,7 @@ import logging
 import numpy as np
 from datetime import datetime
 import csv
+import yaml
 
 # Check and create log directory (in project root, not src/)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,6 +49,43 @@ def setup_logger(name):
 
 # Create a default logger
 logger = setup_logger('gamma_analysis')
+
+DEFAULT_CONFIG = {
+    "dta": 3,
+    "dd": 3,
+    "suppression_level": 10,
+    "roi_margin": 2,
+    "save_csv": False,
+    "csv_export_path": "csv_exports",
+    "interpolation_method": "cubic",
+    "smoothing_factor": 1.0,
+    "fill_value_type": "zero",
+    "mcc_interpolation_method": "cubic",
+    "mcc_fill_value_type": "zero",
+    "roi_threshold_percent": 1,
+}
+
+
+def load_app_config():
+    """Loads application config from the repository root with stable defaults."""
+    config_path = os.path.join(project_root, "config.yaml")
+    config = DEFAULT_CONFIG.copy()
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError("config.yaml must contain a top-level mapping.")
+        config.update(loaded)
+    except FileNotFoundError:
+        logger.warning("config.yaml not found. Using default values.")
+    except Exception as e:
+        logger.error(f"Error loading config.yaml. Using default values: {e}")
+    return config
+
+
+def get_config_fill_value(fill_value_type):
+    """Converts fill value config to the numeric value used by interpolation."""
+    return 0.0 if fill_value_type == "zero" else np.nan
 
 def find_nearest_index(array, value):
     """Returns the index of the element in the array that is closest to the given value.

@@ -154,6 +154,7 @@ def draw_image(canvas, image_data, extent, title, colorbar_label=None,
 from src.data_manager import DataManager
 from src.analysis import extract_profile_data
 from src.file_handlers import MCCFileHandler
+from src.utils import load_app_config, get_config_fill_value
 
 class PlotManager:
     """
@@ -194,12 +195,13 @@ class PlotManager:
         if not np.any(valid_mask):
             return None, None
 
+        config = load_app_config()
         interp_data = griddata(
             (dm.file_b_handler.phys_x_mesh[valid_mask], dm.file_b_handler.phys_y_mesh[valid_mask]),
             mcc_data[valid_mask],
             (dm.file_a_handler.phys_x_mesh, dm.file_a_handler.phys_y_mesh),
-            method='linear',
-            fill_value=0
+            method=config["interpolation_method"],
+            fill_value=get_config_fill_value(config["fill_value_type"])
         )
         return interp_data, dm.file_a_handler.get_physical_extent()
  
