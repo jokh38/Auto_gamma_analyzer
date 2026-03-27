@@ -39,10 +39,6 @@ def _add_results_table(ax, dta, dd, suppression_level, pass_rate, total_points,
                        passed_points, failed_points, dd_stats, dta_stats):
     """Render report metrics as a compact table."""
     rows = [
-        ["Criteria", ""],
-        ["DTA (mm)", f"{dta:g}"],
-        ["DD (%)", f"{dd:g}"],
-        ["Threshold (%)", f"{suppression_level:g}"],
         ["Gamma", ""],
         ["Pass Rate (%)", f"{pass_rate:.2f}"],
         ["Analyzed", f"{total_points:,}"],
@@ -68,6 +64,13 @@ def _add_results_table(ax, dta, dd, suppression_level, pass_rate, total_points,
             ["DTA Std (mm)", f"{dta_stats.get('std', 0):.2f}"],
         ])
 
+    rows.extend([
+        ["Criteria", ""],
+        ["DTA (mm)", f"{dta:g}"],
+        ["DD (%)", f"{dd:g}"],
+        ["Threshold (%)", f"{suppression_level:g}"],
+    ])
+
     table = ax.table(
         cellText=rows,
         colLabels=["Metric", "Value"],
@@ -81,12 +84,16 @@ def _add_results_table(ax, dta, dd, suppression_level, pass_rate, total_points,
     table.scale(1.0, 1.28)
 
     section_rows = {"Criteria", "Gamma", "DD Analysis", "DTA Analysis"}
+    gamma_section_rows = {"Gamma", "Pass Rate (%)", "Analyzed", "Passed", "Failed"}
     if pass_rate >= 95.0:
-        gamma_row_color = '#eaffea'
+        gamma_highlight = '#dff5df'
+        gamma_edge = '#2ca02c'
     elif pass_rate >= 90.0:
-        gamma_row_color = '#fffae6'
+        gamma_highlight = '#fff4cf'
+        gamma_edge = '#ff7f0e'
     else:
-        gamma_row_color = '#ffeaea'
+        gamma_highlight = '#ffdede'
+        gamma_edge = '#d62728'
 
     for (row, col), cell in table.get_celld().items():
         cell.set_edgecolor('black')
@@ -99,12 +106,19 @@ def _add_results_table(ax, dta, dd, suppression_level, pass_rate, total_points,
 
         metric = rows[row - 1][0]
         if metric in section_rows:
-            cell.set_facecolor('#eef4f8')
+            cell.set_facecolor(gamma_highlight if metric == "Gamma" else '#eef4f8')
             cell.get_text().set_weight('bold')
+            if metric == "Gamma":
+                cell.set_edgecolor(gamma_edge)
+                cell.set_linewidth(1.8)
             if col == 1:
                 cell.get_text().set_text("")
-        elif metric == "Pass Rate (%)":
-            cell.set_facecolor(gamma_row_color)
+        elif metric in gamma_section_rows:
+            cell.set_facecolor(gamma_highlight)
+            if metric == "Pass Rate (%)":
+                cell.get_text().set_weight('bold')
+            cell.set_edgecolor(gamma_edge)
+            cell.set_linewidth(1.4)
         else:
             cell.set_facecolor('white')
 
