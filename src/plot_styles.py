@@ -9,7 +9,7 @@ def get_gamma_colormap():
         "gamma_report_map",
         [
             (0.0, "#3b4cc0"),
-            (0.5, "#dddcdc"),
+            (0.5, "#f0f0f0"),
             (1.0, "#b40426"),
         ],
     )

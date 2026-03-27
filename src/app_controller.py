@@ -486,8 +486,8 @@ class AppController:
             dicom_filename = dm.file_a_handler.get_filename()
             dicom_filename_base = os.path.splitext(dicom_filename)[0] if dicom_filename else 'file'
 
-            default_path = os.path.join(report_dir, f"report_{patient_id}_{dicom_filename_base}.jpg")
-            output_path, _ = QFileDialog.getSaveFileName(self.main_view, "Save Report", default_path, "JPEG Image (*.jpg *.jpeg);;PDF Document (*.pdf)")
+            default_path = os.path.join(report_dir, f"report_{patient_id}_{dicom_filename_base}.pdf")
+            output_path, _ = QFileDialog.getSaveFileName(self.main_view, "Save Report", default_path, "PDF Document (*.pdf);;JPEG Image (*.jpg *.jpeg)")
             if not output_path: return
 
             original_profile_line = dm.profile_line
