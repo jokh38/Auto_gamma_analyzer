@@ -27,6 +27,9 @@ class DataManager:
         # DICOM origin and coordinate data
         self.initial_dicom_phys_coords: Optional[Tuple[np.ndarray, np.ndarray]] = None
         self.initial_dicom_pixel_origin: Optional[Tuple[int, int]] = None
+        self.initial_dicom_origin_mm: Optional[Tuple[float, float]] = None
+        self.initial_dicom_handler_meshes: Optional[Tuple[np.ndarray, np.ndarray]] = None
+        self.initial_dicom_handler_extent: Optional[List[float]] = None
 
         # Profile-related data
         self.profile_line: Optional[Dict[str, Any]] = None

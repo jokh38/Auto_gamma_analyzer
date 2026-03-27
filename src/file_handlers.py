@@ -233,13 +233,13 @@ class DicomFileHandler(BaseFileHandler):
             height, width = self.pixel_data.shape
 
             if hasattr(self.dicom_data, 'ImagePositionPatient'):
-                # ImagePositionPatient: [x, z, y]
+                # ImagePositionPatient is handled here as (x, z) for the in-plane coordinates.
                 # Calculate pixel origin by dividing physical position by pixel spacing
                 self.dicom_origin_x = int(round(self.dicom_data.ImagePositionPatient[0] / self.pixel_spacing)) + 1
-                self.dicom_origin_y = int(round(self.dicom_data.ImagePositionPatient[2] / self.pixel_spacing)) - 1 # y-coordinate is at index 2
+                self.dicom_origin_y = int(round(self.dicom_data.ImagePositionPatient[2] / self.pixel_spacing)) - 1
 
-                logger.info(f"Used ImagePositionPatient values: x={self.dicom_data.ImagePositionPatient[0]}, y={self.dicom_data.ImagePositionPatient[2]}")
-                logger.info(f"DICOM pixel origin set (from ImagePositionPatient): x={self.dicom_origin_x}, y={self.dicom_origin_y}")
+                logger.info(f"Used ImagePositionPatient values: x={self.dicom_data.ImagePositionPatient[0]}, z={self.dicom_data.ImagePositionPatient[2]}")
+                logger.info(f"DICOM pixel origin set (from ImagePositionPatient): x={self.dicom_origin_x}, z={self.dicom_origin_y}")
                 logger.info(f"Used PixelSpacing value: {self.pixel_spacing}")
             else:
                 self.dicom_origin_x = -width // 2 + 1

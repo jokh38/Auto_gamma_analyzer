@@ -49,7 +49,6 @@ class GammaAnalysisApp(QMainWindow):
         self.connect_signals()
         self.controller.set_profile_direction(self.profile_direction)
 
-        # Apply Dark Theme
         self.setStyleSheet(DARK_THEME_QSS)
 
     def init_ui(self):

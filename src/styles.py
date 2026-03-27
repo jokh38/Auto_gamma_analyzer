@@ -1,4 +1,3 @@
-
 """
 Modern Dark Theme Styles for the Auto Gamma Analyzer
 """
