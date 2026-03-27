@@ -275,7 +275,11 @@ class PlotManager:
             self.profile_canvas.axes.set_title(f'Dose Profile: {title_prefix}')
 
             extent = None
-            if self.data_manager.file_a_handler is not None:
+            if self.data_manager.file_b_handler is not None:
+                extent = self.data_manager.file_b_handler.get_physical_extent()
+            elif self.data_manager.mcc_handler is not None:
+                extent = self.data_manager.mcc_handler.get_physical_extent()
+            elif self.data_manager.file_a_handler is not None:
                 extent = self.data_manager.file_a_handler.get_physical_extent()
             elif self.data_manager.dicom_handler is not None:
                 extent = self.data_manager.dicom_handler.get_physical_extent()
