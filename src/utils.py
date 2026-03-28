@@ -2,17 +2,47 @@
 This module provides utility functions for the application, including logging and array manipulation.
 """
 import os
+import sys
 import logging
 import numpy as np
 from datetime import datetime
 import csv
 import yaml
 
-# Check and create log directory (in project root, not src/)
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-log_dir = os.path.join(project_root, 'logs')
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
+
+
+def is_frozen_app():
+    """Returns whether the app is running from a PyInstaller bundle."""
+    return getattr(sys, "frozen", False)
+
+
+def get_bundle_dir():
+    """Returns the PyInstaller extraction dir or the repository root."""
+    if is_frozen_app() and hasattr(sys, "_MEIPASS"):
+        return sys._MEIPASS
+    return project_root
+
+
+def get_user_data_dir():
+    """Returns a writable per-user directory for logs and app output."""
+    if os.name == "nt":
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if local_appdata:
+            return os.path.join(local_appdata, "AutoGammaAnalyzer")
+    return os.path.join(os.path.expanduser("~"), ".auto_gamma_analyzer")
+
+
+def get_default_report_dir():
+    """Returns the default directory for generated reports."""
+    documents_dir = os.path.join(os.path.expanduser("~"), "Documents")
+    if os.path.isdir(documents_dir):
+        return os.path.join(documents_dir, "AutoGammaAnalyzer", "Report")
+    return os.path.join(get_user_data_dir(), "Report")
+
+
+log_dir = os.path.join(get_user_data_dir(), "logs")
+os.makedirs(log_dir, exist_ok=True)
 
 # Log file setup (daily log file)
 log_file = os.path.join(log_dir, f'gamma_analysis_{datetime.now().strftime("%Y%m%d")}.log')
@@ -67,19 +97,31 @@ DEFAULT_CONFIG = {
 
 
 def load_app_config():
-    """Loads application config from the repository root with stable defaults."""
-    config_path = os.path.join(project_root, "config.yaml")
+    """Loads application config from the executable dir or bundled defaults."""
     config = DEFAULT_CONFIG.copy()
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            loaded = yaml.safe_load(f) or {}
-        if not isinstance(loaded, dict):
-            raise ValueError("config.yaml must contain a top-level mapping.")
-        config.update(loaded)
-    except FileNotFoundError:
-        logger.warning("config.yaml not found. Using default values.")
-    except Exception as e:
-        logger.error(f"Error loading config.yaml. Using default values: {e}")
+    config_paths = [
+        os.path.join(os.path.dirname(sys.executable), "config.yaml")
+        if is_frozen_app() else None,
+        os.path.join(get_bundle_dir(), "config.yaml"),
+        os.path.join(project_root, "config.yaml"),
+    ]
+
+    for config_path in [path for path in config_paths if path]:
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                loaded = yaml.safe_load(f) or {}
+            if not isinstance(loaded, dict):
+                raise ValueError("config.yaml must contain a top-level mapping.")
+            config.update(loaded)
+            logger.info(f"Loaded config from {config_path}")
+            return config
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            logger.error(f"Error loading config.yaml from {config_path}. Using default values: {e}")
+            return config
+
+    logger.warning("config.yaml not found. Using default values.")
     return config
 
 

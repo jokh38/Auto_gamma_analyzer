@@ -1,7 +1,7 @@
 import os
 import numpy as np
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSettings
 
 from src.data_manager import DataManager
 from src.ui_components import PlotManager
@@ -24,6 +24,26 @@ class AppController:
         self.data_manager = data_manager
         self.plot_manager = plot_manager
         self.app_config = load_app_config()
+        self.settings = QSettings("AutoGammaAnalyzer", "AutoGammaAnalyzer")
+
+    def _get_initial_dialog_dir(self):
+        """Returns the default first-launch directory for file dialogs."""
+        if os.name == "nt":
+            return os.path.splitdrive(os.getcwd())[0] + "\\"
+        return os.path.abspath(os.sep)
+
+    def _get_dialog_dir(self, key):
+        """Returns a persisted dialog directory or the root directory on first use."""
+        saved_dir = self.settings.value(key, "", type=str)
+        if saved_dir and os.path.isdir(saved_dir):
+            return saved_dir
+        return self._get_initial_dialog_dir()
+
+    def _remember_dialog_dir(self, key, file_path):
+        """Stores the directory of the selected file for future dialog openings."""
+        selected_dir = os.path.dirname(file_path)
+        if selected_dir and os.path.isdir(selected_dir):
+            self.settings.setValue(key, selected_dir)
 
     def _set_file_label(self, label_widget, prefix, filename):
         """Keep file labels from changing splitter widths when long names are loaded."""
@@ -258,13 +278,15 @@ class AppController:
         """Load File A (Top display) - supports both DCM and MCC files."""
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
+        start_dir = self._get_dialog_dir("paths/load_dir")
         filename, _ = QFileDialog.getOpenFileName(
-            self.main_view, "Open File A (Top)", "./",
+            self.main_view, "Open File A (Top)", start_dir,
             "All Supported Files (*.dcm *.mcc);;DICOM Files (*.dcm);;MCC Files (*.mcc);;All Files (*)",
             options=options
         )
         if not filename:
             return
+        self._remember_dialog_dir("paths/load_dir", filename)
 
         try:
             # Determine file type and create appropriate handler
@@ -344,13 +366,15 @@ class AppController:
         """Load File B (Bottom display) - supports both DCM and MCC files."""
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
+        start_dir = self._get_dialog_dir("paths/load_dir")
         filename, _ = QFileDialog.getOpenFileName(
-            self.main_view, "Open File B (Bottom)", "./",
+            self.main_view, "Open File B (Bottom)", start_dir,
             "All Supported Files (*.dcm *.mcc);;DICOM Files (*.dcm);;MCC Files (*.mcc);;All Files (*)",
             options=options
         )
         if not filename:
             return
+        self._remember_dialog_dir("paths/load_dir", filename)
 
         try:
             # Determine file type and create appropriate handler
@@ -480,9 +504,7 @@ class AppController:
             return
 
         try:
-            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            report_dir = os.path.join(base_dir, 'Report')
-            os.makedirs(report_dir, exist_ok=True)
+            report_dir = self._get_dialog_dir("paths/report_dir")
 
             # Use File A as the primary report source.
             institution, patient_id, patient_name = dm.file_a_handler.get_patient_info()
@@ -492,6 +514,7 @@ class AppController:
             default_path = os.path.join(report_dir, f"report_{patient_id}_{dicom_filename_base}.pdf")
             output_path, _ = QFileDialog.getSaveFileName(self.main_view, "Save Report", default_path, "PDF Document (*.pdf);;JPEG Image (*.jpg *.jpeg)")
             if not output_path: return
+            self._remember_dialog_dir("paths/report_dir", output_path)
 
             original_profile_line = dm.profile_line
             dm.profile_line = {"type": "vertical", "x": 0}
