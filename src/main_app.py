@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                              QSpinBox, QDoubleSpinBox, QComboBox, QGridLayout, 
                              QScrollArea, QGroupBox, QMessageBox, QSplitter, QFrame,
-                             QSizePolicy)
+                             QSizePolicy, QSpacerItem)
 from PyQt5.QtCore import Qt, QTimer
 from typing import Optional
 
@@ -129,13 +129,18 @@ class GammaAnalysisApp(QMainWindow):
         run_report_group = QGroupBox("Actions")
         run_report_layout = QVBoxLayout(run_report_group)
         self.generate_report_btn = QPushButton("Generate Report")
+        self.auto_analysis_btn = QPushButton("Auto analysis")
+        self.clear_data_btn = QPushButton("Clear data")
         self.generate_report_btn.setEnabled(False)
-        for button in (self.vertical_btn, self.horizontal_btn, self.generate_report_btn, self.close_btn if hasattr(self, "close_btn") else None):
+        for button in (self.vertical_btn, self.horizontal_btn, self.generate_report_btn, self.auto_analysis_btn, self.clear_data_btn, self.close_btn if hasattr(self, "close_btn") else None):
             if button is not None:
                 button.setMinimumHeight(34)
                 button.setMinimumWidth(max(button.minimumWidth(), 150))
                 button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         run_report_layout.addWidget(self.generate_report_btn)
+        run_report_layout.addWidget(self.auto_analysis_btn)
+        run_report_layout.addSpacerItem(QSpacerItem(20, 14, QSizePolicy.Minimum, QSizePolicy.Fixed))
+        run_report_layout.addWidget(self.clear_data_btn)
         
         sidebar_layout.addWidget(device_group)
         sidebar_layout.addWidget(origin_group)
@@ -347,6 +352,8 @@ class GammaAnalysisApp(QMainWindow):
         self.load_dicom_btn.clicked.connect(self.controller.load_dicom_file)
         self.load_measurement_btn.clicked.connect(self.controller.load_measurement_file)
         self.generate_report_btn.clicked.connect(self.controller.generate_report)
+        self.auto_analysis_btn.clicked.connect(self.controller.auto_analysis)
+        self.clear_data_btn.clicked.connect(self.controller.clear_data)
         self.close_btn.clicked.connect(self.close)
         
         self.dicom_x_spin.valueChanged.connect(self.controller.update_origin)

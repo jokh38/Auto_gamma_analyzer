@@ -404,6 +404,38 @@ class PlotManager:
                 line=dm.profile_line
             )
 
+    def clear_all_displays(self):
+        """Reset all canvases and the profile table to their empty state."""
+        self.profile_y_max = None
+
+        if self.dicom_canvas is not None:
+            self.dicom_canvas.fig.clear()
+            self.dicom_canvas.axes = self.dicom_canvas.fig.add_subplot(111)
+            self.dicom_canvas.axes.set_title("File A (Top)")
+            self.dicom_canvas.draw_idle()
+
+        if self.mcc_canvas is not None:
+            self.mcc_canvas.fig.clear()
+            self.mcc_canvas.axes = self.mcc_canvas.fig.add_subplot(111)
+            self.mcc_canvas.axes.set_title("File B (Bottom)")
+            self.mcc_canvas.draw_idle()
+
+        if self.profile_canvas is not None:
+            self.profile_canvas.fig.clear()
+            self.profile_canvas.axes = self.profile_canvas.fig.add_subplot(111)
+            self.profile_canvas.axes.set_title("Profile Plot")
+            self.profile_canvas.draw_idle()
+
+        if self.gamma_canvas is not None:
+            self.gamma_canvas.fig.clear()
+            self.gamma_canvas.axes = self.gamma_canvas.fig.add_subplot(111)
+            self.gamma_canvas.axes.set_title("Gamma Analysis")
+            self.gamma_canvas.draw_idle()
+
+        if self.profile_table is not None:
+            self.profile_table.set_profile_direction("vertical")
+            self.profile_table.setRowCount(0)
+
     def draw_gamma_map(self):
         """Draw the gamma map using the shared report colormap."""
         dm = self.data_manager
