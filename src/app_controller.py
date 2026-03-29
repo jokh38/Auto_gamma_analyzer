@@ -77,7 +77,7 @@ class AppController:
     def _get_initial_dialog_dir(self):
         """Returns the default first-launch directory for file dialogs."""
         if os.name == "nt":
-            return os.path.splitdrive(os.getcwd())[0] + "\\"
+            return "C:\\"
         return os.path.abspath(os.sep)
 
     def _get_dialog_dir(self, key):

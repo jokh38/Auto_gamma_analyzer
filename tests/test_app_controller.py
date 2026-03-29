@@ -262,6 +262,10 @@ class TestAppController(unittest.TestCase):
         self.assertEqual(self.controller._extract_beam_key("3G280_2cm.mcc"), "3")
         self.assertIsNone(self.controller._extract_beam_key("beam_without_marker.dcm"))
 
+    @patch('src.app_controller.os.name', 'nt')
+    def test_initial_dialog_dir_defaults_to_c_drive_on_windows(self):
+        self.assertEqual(self.controller._get_initial_dialog_dir(), "C:\\")
+
     def test_collect_batch_pairs(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             for filename in (

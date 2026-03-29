@@ -412,24 +412,37 @@ class PlotManager:
             self.dicom_canvas.fig.clear()
             self.dicom_canvas.axes = self.dicom_canvas.fig.add_subplot(111)
             self.dicom_canvas.axes.set_title("File A (Top)")
+            self.dicom_canvas.axes.set_aspect('equal', adjustable='box')
+            self.dicom_canvas.axes.set_xticks([])
+            self.dicom_canvas.axes.set_yticks([])
+            self.dicom_canvas.fig.tight_layout()
             self.dicom_canvas.draw_idle()
 
         if self.mcc_canvas is not None:
             self.mcc_canvas.fig.clear()
             self.mcc_canvas.axes = self.mcc_canvas.fig.add_subplot(111)
             self.mcc_canvas.axes.set_title("File B (Bottom)")
+            self.mcc_canvas.axes.set_aspect('equal', adjustable='box')
+            self.mcc_canvas.axes.set_xticks([])
+            self.mcc_canvas.axes.set_yticks([])
+            self.mcc_canvas.fig.tight_layout()
             self.mcc_canvas.draw_idle()
 
         if self.profile_canvas is not None:
             self.profile_canvas.fig.clear()
             self.profile_canvas.axes = self.profile_canvas.fig.add_subplot(111)
             self.profile_canvas.axes.set_title("Profile Plot")
+            self.profile_canvas.fig.tight_layout()
             self.profile_canvas.draw_idle()
 
         if self.gamma_canvas is not None:
             self.gamma_canvas.fig.clear()
             self.gamma_canvas.axes = self.gamma_canvas.fig.add_subplot(111)
             self.gamma_canvas.axes.set_title("Gamma Analysis")
+            self.gamma_canvas.axes.set_aspect('equal', adjustable='box')
+            self.gamma_canvas.axes.set_xticks([])
+            self.gamma_canvas.axes.set_yticks([])
+            self.gamma_canvas.fig.tight_layout()
             self.gamma_canvas.draw_idle()
 
         if self.profile_table is not None:
