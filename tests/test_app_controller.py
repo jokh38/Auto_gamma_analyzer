@@ -1,6 +1,7 @@
 import unittest
 import os
 import sys
+import tempfile
 import numpy as np
 
 # Add project root to Python path
@@ -255,6 +256,152 @@ class TestAppController(unittest.TestCase):
         self.controller.update_gamma_parameters()
 
         self.controller.run_gamma_analysis.assert_called_once()
+
+    def test_extract_beam_key(self):
+        self.assertEqual(self.controller._extract_beam_key("1G180.dcm"), "1")
+        self.assertEqual(self.controller._extract_beam_key("3G280_2cm.mcc"), "3")
+        self.assertIsNone(self.controller._extract_beam_key("beam_without_marker.dcm"))
+
+    def test_collect_batch_pairs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for filename in (
+                "1G180.dcm",
+                "1G180.mcc",
+                "2G220.dcm",
+                "2G220_2cm.mcc",
+                "3G280.dcm",
+                "notes.txt",
+                "invalid_name.mcc",
+            ):
+                open(os.path.join(temp_dir, filename), "w", encoding="utf-8").close()
+
+            pairs, skipped = self.controller._collect_batch_pairs(temp_dir)
+
+            self.assertEqual(set(pairs.keys()), {"1", "2"})
+            self.assertEqual(os.path.basename(pairs["1"]["dcm"]), "1G180.dcm")
+            self.assertEqual(os.path.basename(pairs["1"]["mcc"]), "1G180.mcc")
+            self.assertEqual(os.path.basename(pairs["2"]["dcm"]), "2G220.dcm")
+            self.assertEqual(os.path.basename(pairs["2"]["mcc"]), "2G220_2cm.mcc")
+            self.assertTrue(any("3G: incomplete pair" in item for item in skipped))
+            self.assertTrue(any("invalid_name.mcc: beam number not found" in item for item in skipped))
+
+    @patch('src.app_controller.pydicom.dcmread')
+    def test_collect_batch_pairs_skips_non_rt_dose_dicoms(self, mock_dcmread):
+        def fake_dcmread(path, stop_before_pixels=True, specific_tags=None):
+            dicom = MagicMock()
+            dicom.Modality = "RTPLAN" if path.endswith("1G180.dcm") else "RTDOSE"
+            return dicom
+
+        mock_dcmread.side_effect = fake_dcmread
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for filename in (
+                "1G180.dcm",
+                "1G180.mcc",
+                "2G220.dcm",
+                "2G220.mcc",
+            ):
+                open(os.path.join(temp_dir, filename), "w", encoding="utf-8").close()
+
+            pairs, skipped = self.controller._collect_batch_pairs(temp_dir)
+
+            self.assertEqual(set(pairs.keys()), {"2"})
+            self.assertTrue(any("1G180.dcm: skipped DICOM modality RTPLAN" in item for item in skipped))
+            self.assertTrue(any("1G: incomplete pair" in item for item in skipped))
+
+    @patch('src.app_controller.QApplication.processEvents')
+    @patch('src.app_controller.QMessageBox.information')
+    @patch('src.app_controller.BatchProgressDialog')
+    @patch('src.app_controller.QFileDialog.getExistingDirectory')
+    def test_auto_analysis_runs_complete_pairs_only(
+        self,
+        mock_get_existing_directory,
+        mock_progress_dialog_class,
+        mock_information,
+        mock_process_events,
+    ):
+        mock_get_existing_directory.return_value = "/tmp/batch"
+        self.controller._remember_dialog_dir = MagicMock()
+        self.controller._collect_batch_pairs = MagicMock(return_value=(
+            {
+                "2": {"dcm": "/tmp/batch/2G220.dcm", "mcc": "/tmp/batch/2G220.mcc"},
+                "1": {"dcm": "/tmp/batch/1G180.dcm", "mcc": "/tmp/batch/1G180.mcc"},
+            },
+            ["4G: incomplete pair"],
+        ))
+        self.controller._set_batch_ui_enabled = MagicMock()
+
+        mock_progress_dialog = MagicMock()
+        mock_progress_dialog_class.return_value = mock_progress_dialog
+
+        file_a_handler = MagicMock()
+        file_a_handler.get_patient_info.return_value = ("N/A", "PID001", "Name")
+        file_a_handler.get_filename.side_effect = ["2G220.dcm", "1G180.dcm"]
+        file_b_handler = MagicMock()
+
+        self.controller._load_batch_pair_handlers = MagicMock(return_value=(file_a_handler, file_b_handler))
+        self.controller._perform_gamma_analysis_for_handlers = MagicMock(return_value=(("gamma",), Mock(), Mock()))
+        self.controller._generate_report_for_handlers = MagicMock()
+
+        self.controller.auto_analysis()
+
+        self.assertEqual(self.controller._load_batch_pair_handlers.call_count, 2)
+        first_call = self.controller._load_batch_pair_handlers.call_args_list[0]
+        second_call = self.controller._load_batch_pair_handlers.call_args_list[1]
+        self.assertEqual(first_call.args, ("/tmp/batch/1G180.dcm", "/tmp/batch/1G180.mcc"))
+        self.assertEqual(second_call.args, ("/tmp/batch/2G220.dcm", "/tmp/batch/2G220.mcc"))
+        self.controller._set_batch_ui_enabled.assert_any_call(False)
+        self.controller._set_batch_ui_enabled.assert_any_call(True)
+        mock_progress_dialog.update_status.assert_any_call(1, 2, "1", "/tmp/batch/1G180.dcm", "/tmp/batch/1G180.mcc")
+        mock_progress_dialog.update_status.assert_any_call(2, 2, "2", "/tmp/batch/2G220.dcm", "/tmp/batch/2G220.mcc")
+        self.assertEqual(self.controller._generate_report_for_handlers.call_count, 2)
+        mock_information.assert_called_once()
+        self.assertIn("Created 2 report(s).", mock_information.call_args.args[2])
+
+    def test_clear_data_resets_loaded_state_and_view(self):
+        self.data_manager.dicom_data = MagicMock()
+        self.data_manager.mcc_data = MagicMock()
+        self.data_manager.file_a_handler = MagicMock()
+        self.data_manager.file_b_handler = MagicMock()
+        self.data_manager.dicom_handler = MagicMock()
+        self.data_manager.mcc_handler = MagicMock()
+        self.data_manager.dicom_roi = MagicMock()
+        self.data_manager.mcc_roi = MagicMock()
+        self.data_manager.initial_dicom_phys_coords = (np.array([0.0]), np.array([0.0]))
+        self.data_manager.initial_dicom_pixel_origin = (0, 0)
+        self.data_manager.initial_dicom_origin_mm = (0.0, 0.0)
+        self.data_manager.initial_dicom_handler_meshes = (np.array([0.0]), np.array([0.0]))
+        self.data_manager.initial_dicom_handler_extent = [0.0, 1.0, 0.0, 1.0]
+        self.data_manager.profile_line = {"type": "vertical", "x": 0.0}
+        self.data_manager.current_profile_data = {"dummy": True}
+        self.data_manager.gamma_stats = {"pass_rate": 98.0}
+
+        self.mock_view.generate_report_btn = MagicMock()
+        self.mock_view.dicom_label = MagicMock()
+        self.mock_view.mcc_label = MagicMock()
+        self.mock_view.device_label = MagicMock()
+        self.mock_view.dicom_x_spin = MagicMock()
+        self.mock_view.dicom_y_spin = MagicMock()
+        self.plot_manager.clear_all_displays = MagicMock()
+        self.plot_manager.draw_gamma_map = MagicMock()
+
+        self.controller.clear_data()
+
+        self.assertIsNone(self.data_manager.file_a_handler)
+        self.assertIsNone(self.data_manager.file_b_handler)
+        self.assertIsNone(self.data_manager.dicom_handler)
+        self.assertIsNone(self.data_manager.mcc_handler)
+        self.assertIsNone(self.data_manager.dicom_data)
+        self.assertIsNone(self.data_manager.mcc_data)
+        self.assertIsNone(self.data_manager.profile_line)
+        self.assertIsNone(self.data_manager.current_profile_data)
+        self.assertIsNone(self.data_manager.gamma_stats)
+        self.plot_manager.clear_all_displays.assert_called_once()
+        self.mock_view.dicom_label.setText.assert_called_once_with("File A: None")
+        self.mock_view.mcc_label.setText.assert_called_once_with("File B: None")
+        self.mock_view.device_label.setText.assert_called_once_with("Device Type: Not detected")
+        self.mock_view.dicom_x_spin.setValue.assert_called_once_with(0.0)
+        self.mock_view.dicom_y_spin.setValue.assert_called_once_with(0.0)
 
     @patch('src.ui_components.draw_image')
     @patch('src.app_controller.load_dcm')
