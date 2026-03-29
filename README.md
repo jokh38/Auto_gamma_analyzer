@@ -1,61 +1,92 @@
 # Auto Gamma Analysis Tool
 
-2D Gamma Analysis Tool for comparing DICOM RT dose files with MCC measurement data.
+Desktop application for 2D gamma analysis between DICOM RT Dose files and MCC measurement files.
 
 ## Features
 
-- DICOM RT dose file loader
-- MCC file loader (supports both OCTAVIUS 725 and OCTAVIUS 1500 formats)
-- Interactive dose profiles (vertical and horizontal)
-- 2D Gamma analysis with adjustable parameters
-- PDF report generation
+- Load DICOM RT Dose and MCC files
+- Support OCTAVIUS 725 and OCTAVIUS 1500 MCC formats
+- Interactive vertical and horizontal profile views
+- Adjustable gamma criteria (`DTA`, `DD`, `Global`/`Local`)
+- PDF/JPEG report generation
+- Batch `Auto analysis` by beam number
+- `Clear data` to unload File A and File B without closing the app
 
-## Prerequisites
+## Beam Matching In Auto Analysis
 
-- Python 3.6+
+`Auto analysis` scans a selected directory and groups files by beam number using the filename pattern `(\d+)G`.
+
+Examples:
+
+- `1G180.dcm` -> beam `1`
+- `2G220_2cm.mcc` -> beam `2`
+- `3G280_2cm.dcm` -> beam `3`
+
+Rules:
+
+- Only `.dcm` files with DICOM header `Modality == RTDOSE` are used
+- DICOM RT Plan files are skipped
+- Each beam must have one RT Dose `.dcm` and one `.mcc`
+- Reports are saved in the same directory selected for auto analysis
+
+## Requirements
+
+- Python 3.12 recommended
 - PyQt5
 - numpy
 - matplotlib
 - pydicom
-- pymedphys
-- pylinac
+- scipy
+- PyYAML
 
-## File Structure
+Install dependencies:
 
-- `main_app.py`: Main application class and program entry point
-- `file_handlers.py`: Classes for handling DICOM and MCC files
-- `ui_components.py`: UI component classes and drawing functions
-- `analysis.py`: Profile extraction and gamma analysis functions
-- `utils.py`: Utility functions and logging setup
-
-## Usage
-
-1. Run the application:
-```
-python main_app.py
+```bash
+pip install -r requirements.txt
 ```
 
-2. Load a DICOM RT dose file and an MCC measurement file.
-3. Adjust the origin if necessary.
-4. Click on the DICOM image to generate a profile.
-5. Set gamma analysis parameters and run the analysis.
-6. Generate a PDF report of the results.
+## Run From Source
 
-## Library Reference
+Start the GUI:
 
-- numpy (1.21.0): Used for array operations and calculations
-- matplotlib (3.5.1): Used for visualization and plotting
-- PyQt5 (5.15.6): Used for the graphical user interface
-- pydicom (2.3.0): Used for loading and handling DICOM files
-- pymedphys (0.36.0): Used for gamma analysis calculations
-- pylinac (3.7.0): Used for additional DICOM image handling
+```bash
+python run.py
+```
 
-## Log Files
+On first file load, the dialog starts at `C:\` on Windows. After a directory is used once, the app remembers it with `QSettings`.
 
-Log files are stored in the `logs` directory with a date-based naming format.
+## Build With PyInstaller
+
+This repository already includes the PyInstaller spec file:
+
+- [AutoGammaAnalyzer.spec](/mnt/c/MOQUI_SMC/Auto_gamma_analyzer/AutoGammaAnalyzer.spec)
+
+The existing build environment used in this project is:
+
+- `.build-env`
+
+Build command:
+
+```bash
+'.build-env/Scripts/python.exe' -m PyInstaller --clean --noconfirm AutoGammaAnalyzer.spec
+```
+
+The built executable is generated at:
+
+- [dist/AutoGammaAnalyzer.exe](/mnt/c/MOQUI_SMC/Auto_gamma_analyzer/dist/AutoGammaAnalyzer.exe)
+
+## Main Files
+
+- [run.py](/mnt/c/MOQUI_SMC/Auto_gamma_analyzer/run.py): application entry point
+- [src/main_app.py](/mnt/c/MOQUI_SMC/Auto_gamma_analyzer/src/main_app.py): main window and UI wiring
+- [src/app_controller.py](/mnt/c/MOQUI_SMC/Auto_gamma_analyzer/src/app_controller.py): application logic
+- [src/file_handlers.py](/mnt/c/MOQUI_SMC/Auto_gamma_analyzer/src/file_handlers.py): DICOM and MCC handlers
+- [src/analysis.py](/mnt/c/MOQUI_SMC/Auto_gamma_analyzer/src/analysis.py): profile extraction and gamma analysis
+- [src/reporting.py](/mnt/c/MOQUI_SMC/Auto_gamma_analyzer/src/reporting.py): report generation
+- [src/ui_components.py](/mnt/c/MOQUI_SMC/Auto_gamma_analyzer/src/ui_components.py): plotting and UI components
 
 ## Notes
 
-- MCC files from both OCTAVIUS 725 and OCTAVIUS 1500 devices are supported
-- Default gamma criteria are 3mm/3%
-- Both local and global gamma analysis methods are supported
+- Default gamma criteria are loaded from `config.yaml`
+- Log files are written to the user data directory
+- Auto analysis disables the main UI while batch processing is running and shows a small progress window
