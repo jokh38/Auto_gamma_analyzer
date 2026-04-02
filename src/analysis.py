@@ -4,7 +4,7 @@ This module provides functions for analyzing and comparing DICOM and MCC data,
 including profile extraction and gamma analysis.
 """
 import numpy as np
-from scipy.interpolate import griddata
+from scipy.interpolate import griddata, RegularGridInterpolator
 from scipy.ndimage import gaussian_filter
 from src.utils import (
     logger,
@@ -27,6 +27,27 @@ def _get_handler_grid(handler):
         return None, None
 
     return pixel_data, np.isfinite(pixel_data)
+
+def _build_dicom_interpolator(dicom_handler, dicom_image):
+    """Builds a 2D interpolator over the DICOM dose grid in physical coordinates."""
+    x_axis = np.asarray(dicom_handler.phys_x_mesh[0, :], dtype=float)
+    y_axis = np.asarray(dicom_handler.phys_y_mesh[:, 0], dtype=float)
+    grid = np.asarray(dicom_image, dtype=float)
+
+    if y_axis[0] > y_axis[-1]:
+        y_axis = y_axis[::-1]
+        grid = grid[::-1, :]
+
+    if x_axis[0] > x_axis[-1]:
+        x_axis = x_axis[::-1]
+        grid = grid[:, ::-1]
+
+    return RegularGridInterpolator(
+        (y_axis, x_axis),
+        grid,
+        bounds_error=False,
+        fill_value=np.nan,
+    )
 
 def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=None):
     """
@@ -115,10 +136,20 @@ def extract_profile_data(direction, fixed_position, dicom_handler, mcc_handler=N
                     mcc_phys_coords = mcc_phys_coords[sort_indices]
                     mcc_values = mcc_values[sort_indices]
 
-                # Find corresponding DICOM values at MCC measurement points
-                dicom_at_mcc_positions = np.array([
-                    dicom_values[find_nearest_index(profile_coords_dicom, pos)] for pos in mcc_phys_coords
-                ])
+                # Find corresponding DICOM values at the exact MCC measurement points.
+                dicom_interp = _build_dicom_interpolator(dicom_handler, dicom_image)
+                if direction == "vertical":
+                    sample_points = np.column_stack((
+                        mcc_phys_coords,
+                        np.full_like(mcc_phys_coords, mcc_fixed_axis_coords[closest_idx_mcc], dtype=float),
+                    ))
+                else:  # horizontal
+                    sample_points = np.column_stack((
+                        np.full_like(mcc_phys_coords, mcc_fixed_axis_coords[closest_idx_mcc], dtype=float),
+                        mcc_phys_coords,
+                    ))
+
+                dicom_at_mcc_positions = dicom_interp(sample_points)
 
                 # Interpolate MCC data for smooth plotting
                 if len(mcc_values) > 1:
@@ -214,6 +245,11 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
         phys_x_dicom = dicom_phys_x_mesh[0, :]  # x coordinates
         phys_y_dicom = dicom_phys_y_mesh[:, 0]  # y coordinates
         phys_extent = reference_handler.get_physical_extent()
+        dicom_interpolator = _build_dicom_interpolator(evaluation_handler, dicom_dose_grid)
+
+        x_spacing = np.min(np.abs(np.diff(phys_x_dicom))) if phys_x_dicom.size > 1 else distance_mm_threshold
+        y_spacing = np.min(np.abs(np.diff(phys_y_dicom))) if phys_y_dicom.size > 1 else distance_mm_threshold
+        search_step_mm = max(min(x_spacing, y_spacing) / 2.0, 0.25)
 
         config = load_app_config()
         fill_value = get_config_fill_value(config["fill_value_type"])
@@ -283,20 +319,27 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
             # Optimization: only consider points within DTA threshold
             search_radius = distance_mm_threshold * 2  # Search radius (approximately 2x DTA)
 
-            # Filter search area from DICOM coordinates
+            # Build a sub-mm interpolated search grid over the local window.
             min_x, max_x = point_ref[0] - search_radius, point_ref[0] + search_radius
             min_y, max_y = point_ref[1] - search_radius, point_ref[1] + search_radius
 
-            x_indices = np.where((phys_x_dicom >= min_x) & (phys_x_dicom <= max_x))[0]
-            y_indices = np.where((phys_y_dicom >= min_y) & (phys_y_dicom <= max_y))[0]
+            search_x = np.arange(min_x, max_x + (search_step_mm * 0.5), search_step_mm, dtype=float)
+            search_y = np.arange(min_y, max_y + (search_step_mm * 0.5), search_step_mm, dtype=float)
 
-            if x_indices.size == 0 or y_indices.size == 0:
+            if search_x.size == 0 or search_y.size == 0:
                 continue
 
             # DICOM coordinates and dose values within search area
-            eval_coords_y, eval_coords_x = np.meshgrid(phys_y_dicom[y_indices], phys_x_dicom[x_indices], indexing='ij')
+            eval_coords_y, eval_coords_x = np.meshgrid(search_y, search_x, indexing='ij')
             points_eval = np.vstack((eval_coords_x.ravel(), eval_coords_y.ravel())).T
-            doses_eval = dicom_dose_grid[np.ix_(y_indices, x_indices)].ravel()
+            doses_eval = dicom_interpolator(np.column_stack((points_eval[:, 1], points_eval[:, 0])))
+            valid_eval = np.isfinite(doses_eval)
+
+            if not np.any(valid_eval):
+                continue
+
+            points_eval = points_eval[valid_eval]
+            doses_eval = doses_eval[valid_eval]
 
             # 2. Calculate dose difference
             dose_diff_sq = (doses_eval - dose_ref) ** 2

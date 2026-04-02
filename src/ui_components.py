@@ -513,7 +513,7 @@ class PlotManager:
         """
         Handles the logic for a click event on the File A or File B canvas.
         This will be called by the AppController.
-        Snaps the clicked position to File B resolution if available.
+        Snaps the clicked position to MCC resolution when available.
         """
         dm = self.data_manager
         source_canvas = self.dicom_canvas if source == "A" else self.mcc_canvas
@@ -529,20 +529,35 @@ class PlotManager:
 
         phys_x, phys_y = event.xdata, event.ydata
 
-        # Snap to the clicked source grid first so each file keeps its own resolution.
-        # Fall back to the other loaded handler only if the clicked source lacks one.
-        spacing_handler = source_handler or (dm.file_b_handler if source == "A" else dm.file_a_handler) or dm.mcc_handler
+        # Prefer the MCC grid for snapping so users can only select valid MCC positions,
+        # even when File A is displayed on a 1 mm DICOM grid.
+        snap_handler = None
+        if isinstance(dm.file_b_handler, MCCFileHandler):
+            snap_handler = dm.file_b_handler
+        elif isinstance(dm.mcc_handler, MCCFileHandler):
+            snap_handler = dm.mcc_handler
+        else:
+            snap_handler = source_handler or (dm.file_b_handler if source == "A" else dm.file_a_handler)
 
-        if spacing_handler:
-            spacing_x, spacing_y = spacing_handler.get_spacing()
+        def snap_to_axis(value, axis_coords, spacing_fallback=None):
+            if axis_coords is not None and len(axis_coords) > 0:
+                nearest_idx = int(np.argmin(np.abs(np.asarray(axis_coords, dtype=float) - value)))
+                return float(np.asarray(axis_coords, dtype=float)[nearest_idx])
+            if spacing_fallback:
+                return round(value / spacing_fallback) * spacing_fallback
+            return value
 
-            # Snap the clicked position to the nearest grid point
+        if snap_handler:
             if profile_direction == "vertical":
-                # For vertical profile, snap x position
-                phys_x = round(phys_x / spacing_x) * spacing_x
+                axis_coords = getattr(snap_handler, "phys_x_mesh", None)
+                axis_coords = axis_coords[0, :] if axis_coords is not None else None
+                spacing_x, _ = snap_handler.get_spacing()
+                phys_x = snap_to_axis(phys_x, axis_coords, spacing_x)
             else:
-                # For horizontal profile, snap y position
-                phys_y = round(phys_y / spacing_y) * spacing_y
+                axis_coords = getattr(snap_handler, "phys_y_mesh", None)
+                axis_coords = axis_coords[:, 0] if axis_coords is not None else None
+                _, spacing_y = snap_handler.get_spacing()
+                phys_y = snap_to_axis(phys_y, axis_coords, spacing_y)
 
         dm.profile_line = {"type": profile_direction, "x": phys_x} if profile_direction == "vertical" else {"type": "horizontal", "y": phys_y}
 

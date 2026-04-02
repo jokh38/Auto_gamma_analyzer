@@ -228,18 +228,18 @@ class DicomFileHandler(BaseFileHandler):
 
             if hasattr(self.dicom_data, 'ImagePositionPatient'):
                 # ImagePositionPatient is handled here as (x, z) for the in-plane coordinates.
-                # Calculate pixel origin by dividing physical position by pixel spacing
-                self.dicom_origin_x = int(round(self.dicom_data.ImagePositionPatient[0] / self.pixel_spacing_x)) + 1
-                self.dicom_origin_y = int(round(self.dicom_data.ImagePositionPatient[2] / self.pixel_spacing_y)) - 1
+                # Preserve the exact sub-pixel origin instead of snapping to integer pixels.
+                self.dicom_origin_x = float(self.dicom_data.ImagePositionPatient[0]) / self.pixel_spacing_x
+                self.dicom_origin_y = float(self.dicom_data.ImagePositionPatient[2]) / self.pixel_spacing_y
 
                 logger.info(f"Used ImagePositionPatient values: x={self.dicom_data.ImagePositionPatient[0]}, z={self.dicom_data.ImagePositionPatient[2]}")
-                logger.info(f"DICOM pixel origin set (from ImagePositionPatient): x={self.dicom_origin_x}, z={self.dicom_origin_y}")
+                logger.info(f"DICOM pixel origin set (from ImagePositionPatient): x={self.dicom_origin_x:.3f}, z={self.dicom_origin_y:.3f}")
                 logger.info(
                     f"Used PixelSpacing values: x={self.pixel_spacing_x}, y={self.pixel_spacing_y}"
                 )
             else:
-                self.dicom_origin_x = -width // 2 + 1
-                self.dicom_origin_y = -height // 2 - 1
+                self.dicom_origin_x = -(width - 1) / 2.0
+                self.dicom_origin_y = -(height - 1) / 2.0
                 logger.warning(f"DICOM origin info not found. Defaulting to image center: ({self.dicom_origin_x}, {self.dicom_origin_y})")
 
             self.create_physical_coordinates_dcm()
@@ -260,8 +260,12 @@ class DicomFileHandler(BaseFileHandler):
                 # Convert physical bounds back to pixel coordinates for cropping.
                 # Note: At this point, self.physical_to_pixel_coord returns full-grid pixel coordinates
                 # because self.crop_pixel_offset is (0, 0).
-                min_px, py_for_min_y = self.physical_to_pixel_coord(bounds['min_x'], bounds['min_y'])
-                max_px, py_for_max_y = self.physical_to_pixel_coord(bounds['max_x'], bounds['max_y'])
+                min_px_f, py_for_min_y_f = self.physical_to_pixel_coord(bounds['min_x'], bounds['min_y'])
+                max_px_f, py_for_max_y_f = self.physical_to_pixel_coord(bounds['max_x'], bounds['max_y'])
+                min_px = int(round(min_px_f))
+                max_px = int(round(max_px_f))
+                py_for_min_y = int(round(py_for_min_y_f))
+                py_for_max_y = int(round(py_for_max_y_f))
 
                 # Because of y-axis inversion, min physical y corresponds to max pixel y, so we swap.
                 min_py = py_for_max_y
@@ -293,8 +297,8 @@ class DicomFileHandler(BaseFileHandler):
         """Converts physical coordinates (mm) to cropped pixel coordinates."""
         full_grid_px = phys_x / self.pixel_spacing_x - self.dicom_origin_x
         full_grid_py = -phys_y / self.pixel_spacing_y - self.dicom_origin_y
-        cropped_px = int(round(full_grid_px - self.crop_pixel_offset[0]))
-        cropped_py = int(round(full_grid_py - self.crop_pixel_offset[1]))
+        cropped_px = full_grid_px - self.crop_pixel_offset[0]
+        cropped_py = full_grid_py - self.crop_pixel_offset[1]
 
         return cropped_px, cropped_py
 
@@ -335,8 +339,12 @@ class DicomFileHandler(BaseFileHandler):
         full_phys_x_mesh = self.phys_x_mesh
         full_phys_y_mesh = self.phys_y_mesh
 
-        min_px, py_for_min_y = self.physical_to_pixel_coord(bounds['min_x'], bounds['min_y'])
-        max_px, py_for_max_y = self.physical_to_pixel_coord(bounds['max_x'], bounds['max_y'])
+        min_px_f, py_for_min_y_f = self.physical_to_pixel_coord(bounds['min_x'], bounds['min_y'])
+        max_px_f, py_for_max_y_f = self.physical_to_pixel_coord(bounds['max_x'], bounds['max_y'])
+        min_px = int(round(min_px_f))
+        max_px = int(round(max_px_f))
+        py_for_min_y = int(round(py_for_min_y_f))
+        py_for_max_y = int(round(py_for_max_y_f))
 
         min_py = py_for_max_y
         max_py = py_for_min_y
