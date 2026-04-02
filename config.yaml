@@ -1,13 +1,13 @@
 dta: 2
 dd: 2
-suppression_level: 10
+suppression_level: 5
 roi_margin: 5
 save_csv: false
 csv_export_path: "csv_exports"
 
 # Interpolation settings for gamma, DD, and DTA maps
 interpolation_method: "cubic"  # Options: "linear", "cubic", "nearest"
-smoothing_factor: 1.0          # Gaussian smoothing intensity (0 = no smoothing)
+smoothing_factor: 0          # Gaussian smoothing intensity (0 = no smoothing)
 fill_value_type: "zero"        # Options: "zero" (fills with 0), "nan" (fills with NaN)
 
 # Optional MCC interpolation settings
