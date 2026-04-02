@@ -116,6 +116,10 @@ class GammaAnalysisApp(QMainWindow):
         self.dd_spin = QSpinBox()
         self.dd_spin.setRange(1, 10)
         self.dd_spin.setValue(int(self.app_config["dd"]))
+        self.suppression_spin = QSpinBox()
+        self.suppression_spin.setRange(0, 100)
+        self.suppression_spin.setValue(int(self.app_config["suppression_level"]))
+        self.suppression_spin.setSuffix(" %")
         self.gamma_type_combo = QComboBox()
         self.gamma_type_combo.addItems(["Global", "Local"])
         gamma_layout.addWidget(QLabel("DTA (mm):"), 0, 0)
@@ -124,6 +128,11 @@ class GammaAnalysisApp(QMainWindow):
         gamma_layout.addWidget(self.dd_spin, 1, 1)
         gamma_layout.addWidget(QLabel("Type:"), 2, 0)
         gamma_layout.addWidget(self.gamma_type_combo, 2, 1)
+        gamma_layout.addWidget(QLabel("Dose suppression (%):"), 3, 0)
+        gamma_layout.addWidget(self.suppression_spin, 3, 1)
+        self.dose_suppression_btn = QPushButton("Dose suppression")
+        self.dose_suppression_btn.setMinimumHeight(34)
+        gamma_layout.addWidget(self.dose_suppression_btn, 4, 0, 1, 2)
         
         # 6. Execution
         run_report_group = QGroupBox("Actions")
@@ -361,6 +370,7 @@ class GammaAnalysisApp(QMainWindow):
         self.dta_spin.valueChanged.connect(self.controller.update_gamma_parameters)
         self.dd_spin.valueChanged.connect(self.controller.update_gamma_parameters)
         self.gamma_type_combo.currentTextChanged.connect(lambda _text: self.controller.update_gamma_parameters())
+        self.dose_suppression_btn.clicked.connect(self.controller.update_suppression_level)
 
         self.vertical_btn.clicked.connect(lambda: self.controller.set_profile_direction("vertical"))
         self.horizontal_btn.clicked.connect(lambda: self.controller.set_profile_direction("horizontal"))

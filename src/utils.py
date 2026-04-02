@@ -4,6 +4,7 @@ This module provides utility functions for the application, including logging an
 import os
 import sys
 import logging
+import re
 import numpy as np
 from datetime import datetime
 import csv
@@ -62,13 +63,19 @@ def setup_logger(name):
     
     # If handlers are already added, do not add them again
     if not logger.handlers:
-        # File handler
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(logging.INFO)
         file_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(file_format)
-        logger.addHandler(file_handler)
-        
+
+        # File handler
+        try:
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(file_format)
+            logger.addHandler(file_handler)
+        except Exception as exc:
+            # Keep the application importable even if the log directory is not writable.
+            logging.getLogger(__name__).warning(f"File logging disabled: {exc}")
+
         # Console handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
@@ -123,6 +130,59 @@ def load_app_config():
 
     logger.warning("config.yaml not found. Using default values.")
     return config
+
+
+def get_app_config_path():
+    """Returns the most appropriate config.yaml path to read or update."""
+    config_paths = [
+        os.path.join(os.path.dirname(sys.executable), "config.yaml")
+        if is_frozen_app() else None,
+        os.path.join(get_bundle_dir(), "config.yaml"),
+        os.path.join(project_root, "config.yaml"),
+    ]
+
+    for config_path in [path for path in config_paths if path]:
+        if os.path.isfile(config_path):
+            if os.access(os.path.dirname(config_path) or ".", os.W_OK):
+                return config_path
+
+    for config_path in [path for path in config_paths if path]:
+        if os.access(os.path.dirname(config_path) or ".", os.W_OK):
+            return config_path
+
+    return os.path.join(project_root, "config.yaml")
+
+
+def update_app_config_value(key, value):
+    """Updates a single top-level config entry while preserving file formatting."""
+    config_path = get_app_config_path()
+    value_text = str(value)
+
+    try:
+        if os.path.isfile(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                contents = f.read()
+
+            pattern = rf"(?m)^({re.escape(key)}:\s*)(.*)$"
+            replacement = rf"\g<1>{value_text}"
+            updated_contents, count = re.subn(pattern, replacement, contents, count=1)
+
+            if count == 0:
+                updated_contents = contents.rstrip() + f"\n{key}: {value_text}\n"
+
+            with open(config_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(updated_contents)
+        else:
+            config = load_app_config()
+            config[key] = value
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(config, f, sort_keys=False)
+
+        logger.info(f"Updated {key} in {config_path} to {value_text}")
+        return config_path
+    except Exception as exc:
+        logger.error(f"Failed to update {key} in config.yaml: {exc}", exc_info=True)
+        raise
 
 
 def get_config_fill_value(fill_value_type):

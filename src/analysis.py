@@ -190,6 +190,7 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
             reference_handler.phys_y_mesh[all_valid_indices]
         ))
         all_mcc_dose_values = reference_grid[all_valid_indices]
+        total_reference_points = len(all_mcc_dose_values)
 
         # Determine normalization dose for thresholding
         if global_normalisation:
@@ -220,7 +221,17 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
         # If no points are left after filtering, return early.
         if not np.any(analysis_mask):
             logger.warning(f"No reference data points above the {threshold}% dose threshold ({threshold_dose:.2f} Gy). Gamma analysis will be skipped.")
-            gamma_stats = {'pass_rate': 100, 'mean': 0, 'max': 0, 'min': 0, 'total_points': 0}
+            gamma_stats = {
+                'pass_rate': 100,
+                'mean': 0,
+                'max': 0,
+                'min': 0,
+                'total_points': 0,
+                'total_reference_points': total_reference_points,
+                'evaluated_points': 0,
+                'passed_points': 0,
+                'failed_points': 0,
+            }
             gamma_map_for_display = np.full_like(reference_grid, np.nan)
             # Still create interpolated data for the report
             mcc_interp_data = griddata(
@@ -323,13 +334,30 @@ def perform_gamma_analysis(reference_handler, evaluation_handler,
 
         if len(valid_gamma) > 0:
             passed = valid_gamma <= 1
-            gamma_stats['pass_rate'] = 100 * np.sum(passed) / len(valid_gamma)
+            passed_points = int(np.sum(passed))
+            evaluated_points = len(valid_gamma)
+            failed_points = evaluated_points - passed_points
+            gamma_stats['pass_rate'] = 100 * passed_points / evaluated_points
             gamma_stats['mean'] = np.mean(valid_gamma)
             gamma_stats['max'] = np.max(valid_gamma)
             gamma_stats['min'] = np.min(valid_gamma)
-            gamma_stats['total_points'] = len(valid_gamma)
+            gamma_stats['total_points'] = evaluated_points
+            gamma_stats['total_reference_points'] = total_reference_points
+            gamma_stats['evaluated_points'] = evaluated_points
+            gamma_stats['passed_points'] = passed_points
+            gamma_stats['failed_points'] = failed_points
         else:
-            gamma_stats.update({'pass_rate': 0, 'mean': 0, 'max': 0, 'min': 0, 'total_points': 0})
+            gamma_stats.update({
+                'pass_rate': 0,
+                'mean': 0,
+                'max': 0,
+                'min': 0,
+                'total_points': 0,
+                'total_reference_points': total_reference_points,
+                'evaluated_points': 0,
+                'passed_points': 0,
+                'failed_points': 0,
+            })
 
         # Calculate DD and DTA statistics
         dd_stats = {}

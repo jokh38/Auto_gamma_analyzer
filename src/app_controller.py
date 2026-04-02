@@ -7,7 +7,7 @@ from PyQt5.QtCore import Qt, QSettings
 
 from src.data_manager import DataManager
 from src.ui_components import PlotManager
-from src.utils import logger, load_app_config
+from src.utils import logger, load_app_config, update_app_config_value
 from src.load_dcm import load_dcm
 from src.load_mcc import load_mcc
 from src.file_handlers import DicomFileHandler, MCCFileHandler
@@ -740,6 +740,31 @@ class AppController:
 
     def update_gamma_parameters(self):
         """Refresh gamma analysis after any criterion change."""
+        self._auto_run_gamma_analysis_if_ready()
+
+    def update_suppression_level(self):
+        """Persist the dose suppression level and refresh gamma analysis."""
+        new_value = int(self.main_view.suppression_spin.value())
+        self.app_config["suppression_level"] = new_value
+        try:
+            update_app_config_value("suppression_level", new_value)
+        except Exception as exc:
+            QMessageBox.warning(
+                self.main_view,
+                "Warning",
+                f"Could not save dose suppression to config.yaml: {exc}",
+            )
+
+        dm = self.data_manager
+        for handler in {
+            dm.file_a_handler,
+            dm.file_b_handler,
+            dm.dicom_handler,
+            dm.mcc_handler,
+        }:
+            if handler is not None and hasattr(handler, "suppression_level"):
+                handler.suppression_level = new_value
+
         self._auto_run_gamma_analysis_if_ready()
 
     def set_profile_direction(self, direction):

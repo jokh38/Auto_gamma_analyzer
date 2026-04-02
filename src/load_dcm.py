@@ -33,9 +33,11 @@ def load_dcm(filename: str) -> StandardDoseData:
         pixel_data = dcm.pixel_array * dcm.DoseGridScaling
         height, width = pixel_data.shape
 
-        # Extract spacing and origin information
-        spacing_x, spacing_y = dcm.PixelSpacing
-        pos_x, pos_y, = dcm.ImagePositionPatient[0], dcm.ImagePositionPatient[2]  # Corrected order
+        # DICOM PixelSpacing is stored as [row_spacing, column_spacing].
+        # The in-plane x axis uses the column spacing, and the in-plane y axis uses the row spacing.
+        spacing_y, spacing_x = map(float, dcm.PixelSpacing)
+        pos_x = float(dcm.ImagePositionPatient[0])
+        pos_y = float(dcm.ImagePositionPatient[2])
 
         # 1. Create standardized physical coordinates (Y-axis increasing upwards)
         x_coords = (np.arange(width) * spacing_x) + pos_x
@@ -58,6 +60,8 @@ def load_dcm(filename: str) -> StandardDoseData:
             "dose_grid_scaling": dcm.DoseGridScaling,
             "image_position_patient": dcm.ImagePositionPatient,
             "pixel_spacing": dcm.PixelSpacing,
+            "pixel_spacing_x": spacing_x,
+            "pixel_spacing_y": spacing_y,
         }
 
         # 4. Create and return the standard data object

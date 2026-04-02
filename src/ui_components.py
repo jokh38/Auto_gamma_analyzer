@@ -2,6 +2,7 @@ import numpy as np
 from scipy.interpolate import griddata, interpn
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -103,6 +104,7 @@ class ProfileDataTable(QTableWidget):
 
                 item_meas = QTableWidgetItem(f"{meas * 100:.1f}")  # Convert to cGy
                 item_meas.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                item_meas.setForeground(QColor("#22c55e"))
                 self.setItem(i, 2, item_meas)
 
                 gamma_text = "N/A"
@@ -111,6 +113,8 @@ class ProfileDataTable(QTableWidget):
 
                 item_gamma = QTableWidgetItem(gamma_text)
                 item_gamma.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if valid_gamma is not None and i < len(valid_gamma) and np.isfinite(valid_gamma[i]) and valid_gamma[i] > 1.0:
+                    item_gamma.setForeground(QColor("#ef4444"))
                 self.setItem(i, 3, item_gamma)
 
 
@@ -263,7 +267,7 @@ class PlotManager:
                 self.profile_canvas.axes.plot(
                     profile_data['mcc_phys_coords'],
                     profile_data['mcc_values'],
-                    'ro',
+                    'go',
                     label='B',
                     markersize=5
                 )
@@ -525,9 +529,9 @@ class PlotManager:
 
         phys_x, phys_y = event.xdata, event.ydata
 
-        # Snap to File B resolution if available so the profile line stays aligned
-        # with the measurement/reference grid used throughout the application.
-        spacing_handler = dm.file_b_handler if dm.file_b_handler else dm.mcc_handler
+        # Snap to the clicked source grid first so each file keeps its own resolution.
+        # Fall back to the other loaded handler only if the clicked source lacks one.
+        spacing_handler = source_handler or (dm.file_b_handler if source == "A" else dm.file_a_handler) or dm.mcc_handler
 
         if spacing_handler:
             spacing_x, spacing_y = spacing_handler.get_spacing()

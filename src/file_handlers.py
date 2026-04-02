@@ -22,6 +22,8 @@ class BaseFileHandler:
         self.origin_x = 0
         self.origin_y = 0
         self.pixel_spacing = 1.0
+        self.pixel_spacing_x = 1.0
+        self.pixel_spacing_y = 1.0
         self.dose_bounds = None
         self.crop_pixel_offset = (0, 0)
 
@@ -48,6 +50,9 @@ class BaseFileHandler:
 
     def get_spacing(self):
         """Returns the pixel spacing."""
+        if hasattr(self, "pixel_spacing_x") and hasattr(self, "pixel_spacing_y"):
+            if self.pixel_spacing_x != 1.0 or self.pixel_spacing_y != 1.0:
+                return self.pixel_spacing_x, self.pixel_spacing_y
         return self.pixel_spacing, self.pixel_spacing
 
     def get_pixel_data(self):
@@ -187,6 +192,8 @@ class DicomFileHandler(BaseFileHandler):
         self.dicom_origin_x = 0
         self.dicom_origin_y = 0
         self.pixel_spacing = 1.0
+        self.pixel_spacing_x = 1.0
+        self.pixel_spacing_y = 1.0
 
     def open_file(self, filename):
         """
@@ -212,19 +219,24 @@ class DicomFileHandler(BaseFileHandler):
             self.pixel_data = self.dicom_data.pixel_array * self.dicom_data.DoseGridScaling
 
             if hasattr(self.dicom_data, 'PixelSpacing'):
-                self.pixel_spacing = float(self.dicom_data.PixelSpacing[0])
+                spacing_y, spacing_x = map(float, self.dicom_data.PixelSpacing)
+                self.pixel_spacing_x = spacing_x
+                self.pixel_spacing_y = spacing_y
+                self.pixel_spacing = spacing_x
 
             height, width = self.pixel_data.shape
 
             if hasattr(self.dicom_data, 'ImagePositionPatient'):
                 # ImagePositionPatient is handled here as (x, z) for the in-plane coordinates.
                 # Calculate pixel origin by dividing physical position by pixel spacing
-                self.dicom_origin_x = int(round(self.dicom_data.ImagePositionPatient[0] / self.pixel_spacing)) + 1
-                self.dicom_origin_y = int(round(self.dicom_data.ImagePositionPatient[2] / self.pixel_spacing)) - 1
+                self.dicom_origin_x = int(round(self.dicom_data.ImagePositionPatient[0] / self.pixel_spacing_x)) + 1
+                self.dicom_origin_y = int(round(self.dicom_data.ImagePositionPatient[2] / self.pixel_spacing_y)) - 1
 
                 logger.info(f"Used ImagePositionPatient values: x={self.dicom_data.ImagePositionPatient[0]}, z={self.dicom_data.ImagePositionPatient[2]}")
                 logger.info(f"DICOM pixel origin set (from ImagePositionPatient): x={self.dicom_origin_x}, z={self.dicom_origin_y}")
-                logger.info(f"Used PixelSpacing value: {self.pixel_spacing}")
+                logger.info(
+                    f"Used PixelSpacing values: x={self.pixel_spacing_x}, y={self.pixel_spacing_y}"
+                )
             else:
                 self.dicom_origin_x = -width // 2 + 1
                 self.dicom_origin_y = -height // 2 - 1
@@ -279,8 +291,8 @@ class DicomFileHandler(BaseFileHandler):
 
     def physical_to_pixel_coord(self, phys_x, phys_y):
         """Converts physical coordinates (mm) to cropped pixel coordinates."""
-        full_grid_px = phys_x / self.pixel_spacing - self.dicom_origin_x
-        full_grid_py = -phys_y / self.pixel_spacing - self.dicom_origin_y
+        full_grid_px = phys_x / self.pixel_spacing_x - self.dicom_origin_x
+        full_grid_py = -phys_y / self.pixel_spacing_y - self.dicom_origin_y
         cropped_px = int(round(full_grid_px - self.crop_pixel_offset[0]))
         cropped_py = int(round(full_grid_py - self.crop_pixel_offset[1]))
 
@@ -291,8 +303,8 @@ class DicomFileHandler(BaseFileHandler):
         full_grid_px = pixel_x + self.crop_pixel_offset[0]
         full_grid_py = pixel_y + self.crop_pixel_offset[1]
 
-        phys_x = (full_grid_px + self.dicom_origin_x) * self.pixel_spacing
-        phys_y = (full_grid_py + self.dicom_origin_y) * -self.pixel_spacing
+        phys_x = (full_grid_px + self.dicom_origin_x) * self.pixel_spacing_x
+        phys_y = (full_grid_py + self.dicom_origin_y) * -self.pixel_spacing_y
         return phys_x, phys_y
 
     def get_origin_coords(self):
@@ -301,7 +313,7 @@ class DicomFileHandler(BaseFileHandler):
 
     def get_spacing(self):
         """Returns the DICOM pixel spacing in mm."""
-        return self.pixel_spacing, self.pixel_spacing
+        return self.pixel_spacing_x, self.pixel_spacing_y
 
     def get_patient_info(self):
         """Returns patient information (institution name, ID, name)."""
@@ -350,8 +362,8 @@ class DicomFileHandler(BaseFileHandler):
         """Creates physical coordinate meshes based on DICOM metadata."""
         if self.pixel_data is None: return
         height, width = self.pixel_data.shape
-        phys_x = (np.arange(width) + self.dicom_origin_x) * self.pixel_spacing
-        phys_y = (np.arange(height) + self.dicom_origin_y) * -self.pixel_spacing
+        phys_x = (np.arange(width) + self.dicom_origin_x) * self.pixel_spacing_x
+        phys_y = (np.arange(height) + self.dicom_origin_y) * -self.pixel_spacing_y
         self.phys_x_mesh, self.phys_y_mesh = np.meshgrid(phys_x, phys_y)
         # physical_extent의 y축 순서를 min, max로 표준화합니다.
         self.physical_extent = [phys_x.min(), phys_x.max(), phys_y.min(), phys_y.max()]

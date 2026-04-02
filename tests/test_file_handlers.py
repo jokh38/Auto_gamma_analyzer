@@ -96,7 +96,7 @@ class TestDicomFileHandler:
         mock_dcm.Modality = 'RTDOSE'
         mock_dcm.pixel_array = np.ones((100, 100)) * 2.0
         mock_dcm.DoseGridScaling = 0.5
-        mock_dcm.PixelSpacing = [2.0, 2.0]
+        mock_dcm.PixelSpacing = [2.0, 3.0]
         mock_dcm.ImagePositionPatient = [10.0, 0.0, 20.0]
         mock_dcm.get = MagicMock(side_effect=lambda key, default: {
             'InstitutionName': 'Test Hospital',
@@ -115,7 +115,9 @@ class TestDicomFileHandler:
             assert success is True
             assert error is None
             assert handler.pixel_data is not None
-            assert handler.pixel_spacing == 2.0
+            assert handler.pixel_spacing_x == 3.0
+            assert handler.pixel_spacing_y == 2.0
+            assert handler.get_spacing() == (3.0, 2.0)
             assert handler.dicom_data is not None
         finally:
             os.chdir(original_dir)

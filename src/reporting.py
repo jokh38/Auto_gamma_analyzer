@@ -73,37 +73,61 @@ def _draw_header(fig, gs_slot, institution, patient_id, patient_name):
             color='#ffffff', zorder=1)
 
 
-def _draw_pass_badge(ax, pass_rate, passed, failed, total):
-    """Draw the pass-rate hero badge with status indicator."""
+def _draw_gamma_summary_table(ax, gamma_stats):
+    """Draw a compact gamma summary table."""
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_facecolor('white')
     ax.axis('off')
 
-    if pass_rate >= 95.0:
-        color, bg, status = '#16a34a', '#f0fdf4', 'PASS'
-    elif pass_rate >= 90.0:
-        color, bg, status = '#d97706', '#fffbeb', 'WARNING'
-    else:
-        color, bg, status = '#dc2626', '#fef2f2', 'FAIL'
+    total_reference_points = int(gamma_stats.get('total_reference_points', gamma_stats.get('total_points', 0)) or 0)
+    evaluated_points = int(gamma_stats.get('evaluated_points', gamma_stats.get('total_points', 0)) or 0)
+    passed_points = int(gamma_stats.get('passed_points', 0) or 0)
+    failed_points = int(gamma_stats.get('failed_points', max(evaluated_points - passed_points, 0)) or 0)
+    def _fmt(count, denominator):
+        proportion = 0.0 if denominator <= 0 else (100.0 * count / denominator)
+        return f"{count:d}", f"{proportion:.1f}%"
 
-    badge = mpatches.FancyBboxPatch(
-        (0.08, 0.08), 0.84, 0.84,
-        boxstyle=mpatches.BoxStyle("Round", pad=0.03),
-        facecolor=bg, edgecolor=color, linewidth=2.5,
-        transform=ax.transAxes)
-    ax.add_patch(badge)
+    rows = [
+        ["MCC dose points", *_fmt(total_reference_points, total_reference_points or 1)],
+        ["Evaluated dose points", *_fmt(evaluated_points, total_reference_points or 1)],
+        ["Passed", *_fmt(passed_points, evaluated_points or 1)],
+        ["Failed", *_fmt(failed_points, evaluated_points or 1)],
+    ]
 
-    ax.text(0.5, 0.70, f'{pass_rate:.1f}%',
-            ha='center', va='center', fontsize=36, weight='bold',
-            color=color, transform=ax.transAxes)
-    ax.text(0.5, 0.46, status,
-            ha='center', va='center', fontsize=20, weight='bold',
-            color=color, transform=ax.transAxes)
-    ax.text(0.5, 0.24,
-            f'{passed} of {total} passed  ({failed} failed)',
-            ha='center', va='center', fontsize=11, color='#4b5563',
-            transform=ax.transAxes)
+    table = ax.table(
+        cellText=rows,
+        colLabels=["Gamma Result", "Count", "Proportion"],
+        colLoc='left',
+        cellLoc='left',
+        colWidths=[0.54, 0.20, 0.26],
+        bbox=[0.03, 0.08, 0.94, 0.84],
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+
+    for (row, col), cell in table.get_celld().items():
+        cell.set_edgecolor(_BORDER)
+        cell.set_linewidth(0.6)
+        cell.get_text().set_color('black')
+        if row == 0:
+            cell.set_facecolor(_HEADER_BG)
+            cell.get_text().set_color('white')
+            cell.get_text().set_weight('bold')
+        else:
+            label = rows[row - 1][0]
+            if label == "Pass rate":
+                if col == 0:
+                    cell.set_facecolor(_SECTION_HEADER_BG)
+                    cell.get_text().set_weight('bold')
+                else:
+                    cell.set_facecolor('white')
+            elif label == "Passed":
+                cell.set_facecolor('#f0fdf4' if col == 0 else 'white')
+            elif label == "Failed":
+                cell.set_facecolor('#fef2f2' if col == 0 else 'white')
+            else:
+                cell.set_facecolor('white')
 
 
 def _draw_criteria_card(ax, dta, dd, suppression_level, dd_stats, dta_stats):
@@ -345,15 +369,9 @@ def generate_report(
     ax_gamma.tick_params(labelsize=9)
     _style_report_axis(ax_gamma)
 
-    # Pass-rate badge (right of gamma)
-    pass_rate = gamma_stats.get('pass_rate', 0)
-    total_points = gamma_stats.get('total_points', 0)
-    passed_points = int(total_points * pass_rate / 100)
-    failed_points = total_points - passed_points
-
+    # Gamma result table (right of gamma)
     ax_badge = fig.add_subplot(gs[3, 1])
-    _draw_pass_badge(ax_badge, pass_rate, passed_points, failed_points,
-                     total_points)
+    _draw_gamma_summary_table(ax_badge, gamma_stats)
 
     # ── Row 4: DD + DTA side-by-side (left) | Criteria card (right) ──
     gs_r4_left = gs[4, 0].subgridspec(1, 2, wspace=0.35)

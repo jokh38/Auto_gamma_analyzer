@@ -13,7 +13,7 @@ from src.analysis import extract_profile_data
 from src.standard_data_model import StandardDoseData
 from src.ui_components import PlotManager
 from src.app_controller import AppController # Need this to create ROI
-from unittest.mock import Mock
+from unittest.mock import Mock, MagicMock
 
 # The temporary PlotManager is no longer needed. We test the real one.
 
@@ -100,6 +100,31 @@ class TestPlotManager(unittest.TestCase):
         gamma_values = plot_manager._get_profile_gamma_values(profile_data)
 
         np.testing.assert_allclose(gamma_values, np.array([0.2, 0.5, 0.8]))
+
+    def test_draw_profile_uses_green_mcc_markers(self):
+        mock_axes = MagicMock()
+        mock_fig = MagicMock()
+        mock_fig.add_subplot.return_value = mock_axes
+        mock_canvas = MagicMock()
+        mock_canvas.fig = mock_fig
+        mock_canvas.axes = mock_axes
+        mock_table = MagicMock()
+        plot_manager = PlotManager(self.data_manager, None, None, mock_canvas, None, mock_table)
+        self.data_manager.profile_line = {"type": "vertical", "x": 0.0}
+        profile_data = {
+            "type": "vertical",
+            "fixed_pos": 0.0,
+            "phys_coords": np.array([0.0, 10.0]),
+            "dicom_values": np.array([1.0, 2.0]),
+            "mcc_phys_coords": np.array([0.0, 10.0]),
+            "mcc_values": np.array([0.9, 1.8]),
+            "dicom_at_mcc": np.array([1.0, 2.0]),
+        }
+
+        plot_manager.draw_profile(profile_data, "vertical")
+
+        self.assertGreaterEqual(mock_axes.plot.call_count, 2)
+        self.assertEqual(mock_axes.plot.call_args_list[1][0][2], "go")
 
 if __name__ == '__main__':
     unittest.main()

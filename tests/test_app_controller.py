@@ -257,6 +257,22 @@ class TestAppController(unittest.TestCase):
 
         self.controller.run_gamma_analysis.assert_called_once()
 
+    @patch('src.app_controller.update_app_config_value')
+    def test_update_suppression_level_persists_config_and_refreshes_gamma(self, mock_update_config):
+        self.data_manager.file_a_handler = MagicMock()
+        self.data_manager.file_b_handler = MagicMock()
+        self.controller.run_gamma_analysis = MagicMock()
+        self.mock_view.suppression_spin = Mock()
+        self.mock_view.suppression_spin.value.return_value = 25
+
+        self.controller.update_suppression_level()
+
+        mock_update_config.assert_called_once_with("suppression_level", 25)
+        self.assertEqual(self.controller.app_config["suppression_level"], 25)
+        self.assertEqual(self.data_manager.file_a_handler.suppression_level, 25)
+        self.assertEqual(self.data_manager.file_b_handler.suppression_level, 25)
+        self.controller.run_gamma_analysis.assert_called_once()
+
     def test_extract_beam_key(self):
         self.assertEqual(self.controller._extract_beam_key("1G180.dcm"), "1")
         self.assertEqual(self.controller._extract_beam_key("3G280_2cm.mcc"), "3")
@@ -267,27 +283,25 @@ class TestAppController(unittest.TestCase):
         self.assertEqual(self.controller._get_initial_dialog_dir(), "C:\\")
 
     def test_collect_batch_pairs(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            for filename in (
-                "1G180.dcm",
-                "1G180.mcc",
-                "2G220.dcm",
-                "2G220_2cm.mcc",
-                "3G280.dcm",
-                "notes.txt",
-                "invalid_name.mcc",
-            ):
-                open(os.path.join(temp_dir, filename), "w", encoding="utf-8").close()
+        with patch('src.app_controller.os.listdir', return_value=[
+            "1G180.dcm",
+            "1G180.mcc",
+            "2G220.dcm",
+            "2G220_2cm.mcc",
+            "3G280.dcm",
+            "notes.txt",
+            "invalid_name.mcc",
+        ]), patch('src.app_controller.os.path.isfile', return_value=True), patch('src.app_controller.pydicom.dcmread') as mock_dcmread:
+            mock_dcmread.return_value.Modality = "RTDOSE"
+            pairs, skipped = self.controller._collect_batch_pairs("C:/mock")
 
-            pairs, skipped = self.controller._collect_batch_pairs(temp_dir)
-
-            self.assertEqual(set(pairs.keys()), {"1", "2"})
-            self.assertEqual(os.path.basename(pairs["1"]["dcm"]), "1G180.dcm")
-            self.assertEqual(os.path.basename(pairs["1"]["mcc"]), "1G180.mcc")
-            self.assertEqual(os.path.basename(pairs["2"]["dcm"]), "2G220.dcm")
-            self.assertEqual(os.path.basename(pairs["2"]["mcc"]), "2G220_2cm.mcc")
-            self.assertTrue(any("3G: incomplete pair" in item for item in skipped))
-            self.assertTrue(any("invalid_name.mcc: beam number not found" in item for item in skipped))
+        self.assertEqual(set(pairs.keys()), {"1", "2"})
+        self.assertEqual(os.path.basename(pairs["1"]["dcm"]), "1G180.dcm")
+        self.assertEqual(os.path.basename(pairs["1"]["mcc"]), "1G180.mcc")
+        self.assertEqual(os.path.basename(pairs["2"]["dcm"]), "2G220.dcm")
+        self.assertEqual(os.path.basename(pairs["2"]["mcc"]), "2G220_2cm.mcc")
+        self.assertTrue(any("3G: incomplete pair" in item for item in skipped))
+        self.assertTrue(any("invalid_name.mcc: beam number not found" in item for item in skipped))
 
     @patch('src.app_controller.pydicom.dcmread')
     def test_collect_batch_pairs_skips_non_rt_dose_dicoms(self, mock_dcmread):
@@ -298,20 +312,17 @@ class TestAppController(unittest.TestCase):
 
         mock_dcmread.side_effect = fake_dcmread
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            for filename in (
-                "1G180.dcm",
-                "1G180.mcc",
-                "2G220.dcm",
-                "2G220.mcc",
-            ):
-                open(os.path.join(temp_dir, filename), "w", encoding="utf-8").close()
+        with patch('src.app_controller.os.listdir', return_value=[
+            "1G180.dcm",
+            "1G180.mcc",
+            "2G220.dcm",
+            "2G220.mcc",
+        ]), patch('src.app_controller.os.path.isfile', return_value=True):
+            pairs, skipped = self.controller._collect_batch_pairs("C:/mock")
 
-            pairs, skipped = self.controller._collect_batch_pairs(temp_dir)
-
-            self.assertEqual(set(pairs.keys()), {"2"})
-            self.assertTrue(any("1G180.dcm: skipped DICOM modality RTPLAN" in item for item in skipped))
-            self.assertTrue(any("1G: incomplete pair" in item for item in skipped))
+        self.assertEqual(set(pairs.keys()), {"2"})
+        self.assertTrue(any("1G180.dcm: skipped DICOM modality RTPLAN" in item for item in skipped))
+        self.assertTrue(any("1G: incomplete pair" in item for item in skipped))
 
     @patch('src.app_controller.QApplication.processEvents')
     @patch('src.app_controller.QMessageBox.information')
