@@ -7,6 +7,10 @@ venv/
 # Python cache
 __pycache__/
 *.pyc
+build_venv/
+build/
+dist/
+*.spec
 
 # Logs
 logs/
