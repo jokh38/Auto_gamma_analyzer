@@ -119,14 +119,14 @@ class ProfileDataTable(QTableWidget):
 
 
 def draw_image(canvas, image_data, extent, title, colorbar_label=None,
-               show_origin=True, show_colorbar=True, line=None):
+               show_origin=True, show_colorbar=True, line=None, view_bounds=None):
     """
     통합된 이미지 그리기 함수.
-    이제 크롭된 ROI 데이터를 직접 받으므로, 확대/크롭 관련 로직이 제거되었습니다.
+    view_bounds가 제공되면 해당 영역만 표시합니다.
     """
     canvas.fig.clear()
     canvas.axes = canvas.fig.add_subplot(111)
-    
+
     # Use origin='upper' for consistent coordinate system with reference code
     im = canvas.axes.imshow(
         image_data,
@@ -135,22 +135,26 @@ def draw_image(canvas, image_data, extent, title, colorbar_label=None,
         origin='upper',
         aspect='equal'
     )
-    
+
+    if view_bounds is not None:
+        canvas.axes.set_xlim(view_bounds['min_x'], view_bounds['max_x'])
+        canvas.axes.set_ylim(view_bounds['min_y'], view_bounds['max_y'])
+
     if show_colorbar and colorbar_label is not None:
         canvas.fig.colorbar(im, ax=canvas.axes, label=colorbar_label, use_gridspec=True, fraction=0.046, pad=0.04)
-    
+
     if show_origin:
         canvas.axes.plot(0, 0, 'wo', markersize=3, markeredgecolor='black')
-    
+
     if line is not None:
         if line["type"] == "vertical":
             canvas.axes.axvline(x=line["x"], color='white', linestyle='-', linewidth=2)
         else:
             canvas.axes.axhline(y=line["y"], color='white', linestyle='-', linewidth=2)
-    
+
     canvas.axes.set_title(title)
     canvas.axes.set_aspect('equal', adjustable='box')
-    
+
     canvas.fig.tight_layout()
     canvas.draw_idle()
 
@@ -158,7 +162,7 @@ def draw_image(canvas, image_data, extent, title, colorbar_label=None,
 from src.data_manager import DataManager
 from src.analysis import extract_profile_data
 from src.file_handlers import MCCFileHandler
-from src.utils import load_app_config, get_config_fill_value
+from src.utils import load_app_config
 
 class PlotManager:
     """
@@ -185,9 +189,6 @@ class PlotManager:
         if not isinstance(dm.file_b_handler, MCCFileHandler):
             return None, None
 
-        if dm.mcc_interp_data is not None:
-            return dm.mcc_interp_data, dm.file_a_handler.get_physical_extent()
-
         if not hasattr(dm.file_a_handler, 'phys_x_mesh') or not hasattr(dm.file_a_handler, 'phys_y_mesh'):
             return None, None
 
@@ -205,7 +206,7 @@ class PlotManager:
             mcc_data[valid_mask],
             (dm.file_a_handler.phys_x_mesh, dm.file_a_handler.phys_y_mesh),
             method=config["interpolation_method"],
-            fill_value=get_config_fill_value(config["fill_value_type"])
+            fill_value=np.nan
         )
         return interp_data, dm.file_a_handler.get_physical_extent()
  
@@ -280,21 +281,27 @@ class PlotManager:
             self.profile_canvas.axes.set_ylabel('Dose (Gy)')
             self.profile_canvas.axes.set_title(f'Dose Profile: {title_prefix}')
 
-            extent = None
-            if self.data_manager.file_b_handler is not None:
-                extent = self.data_manager.file_b_handler.get_physical_extent()
-            elif self.data_manager.mcc_handler is not None:
-                extent = self.data_manager.mcc_handler.get_physical_extent()
-            elif self.data_manager.file_a_handler is not None:
-                extent = self.data_manager.file_a_handler.get_physical_extent()
-            elif self.data_manager.dicom_handler is not None:
-                extent = self.data_manager.dicom_handler.get_physical_extent()
-            elif self.data_manager.dicom_roi is not None:
-                extent = self.data_manager.dicom_roi.physical_extent
+            # Use dose_bounds for profile x-axis limits
+            bounds = None
+            if self.data_manager.file_a_handler is not None:
+                bounds = self.data_manager.file_a_handler.dose_bounds
+            if bounds is None and self.data_manager.file_b_handler is not None:
+                bounds = getattr(self.data_manager.file_b_handler, 'dose_bounds', None)
 
-            if extent is not None:
-                lims = (extent[2], extent[3]) if profile_direction == "vertical" else (extent[0], extent[1])
+            if bounds is not None:
+                lims = (bounds['min_y'], bounds['max_y']) if profile_direction == "vertical" else (bounds['min_x'], bounds['max_x'])
                 self.profile_canvas.axes.set_xlim(lims)
+            else:
+                extent = None
+                if self.data_manager.file_b_handler is not None:
+                    extent = self.data_manager.file_b_handler.get_physical_extent()
+                elif self.data_manager.file_a_handler is not None:
+                    extent = self.data_manager.file_a_handler.get_physical_extent()
+                elif self.data_manager.dicom_roi is not None:
+                    extent = self.data_manager.dicom_roi.physical_extent
+                if extent is not None:
+                    lims = (extent[2], extent[3]) if profile_direction == "vertical" else (extent[0], extent[1])
+                    self.profile_canvas.axes.set_xlim(lims)
 
             # Set fixed Y-axis limits based on max dose (110% of max)
             # Calculate and store max dose on first profile draw or when data changes
@@ -333,16 +340,44 @@ class PlotManager:
             self.profile_canvas.fig.tight_layout()
             self.profile_canvas.draw()
 
+            # Filter table data to dose_bounds region
+            if bounds is not None:
+                if profile_direction == "vertical":
+                    bound_min, bound_max = bounds['min_y'], bounds['max_y']
+                else:
+                    bound_min, bound_max = bounds['min_x'], bounds['max_x']
+            else:
+                bound_min, bound_max = None, None
+
             if 'mcc_phys_coords' in profile_data:
                 gamma_values = self._get_profile_gamma_values(profile_data)
+                tbl_coords = np.asarray(profile_data['mcc_phys_coords'])
+                tbl_dicom = np.asarray(profile_data['dicom_at_mcc'])
+                tbl_mcc = np.asarray(profile_data['mcc_values'])
+                tbl_gamma = np.asarray(gamma_values) if gamma_values is not None else None
+
+                if bound_min is not None and bound_max is not None:
+                    mask = (tbl_coords >= bound_min) & (tbl_coords <= bound_max)
+                    tbl_coords = tbl_coords[mask]
+                    tbl_dicom = tbl_dicom[mask]
+                    tbl_mcc = tbl_mcc[mask]
+                    if tbl_gamma is not None:
+                        tbl_gamma = tbl_gamma[mask]
+
                 self.profile_table.update_data(
-                    profile_data['mcc_phys_coords'],
-                    profile_data['dicom_at_mcc'],
-                    profile_data['mcc_values'],
-                    gamma_values=gamma_values
+                    tbl_coords, tbl_dicom, tbl_mcc,
+                    gamma_values=tbl_gamma
                 )
             else:
-                self.profile_table.update_data(phys_coords, dicom_values)
+                tbl_coords = np.asarray(phys_coords)
+                tbl_dicom = np.asarray(dicom_values)
+
+                if bound_min is not None and bound_max is not None:
+                    mask = (tbl_coords >= bound_min) & (tbl_coords <= bound_max)
+                    tbl_coords = tbl_coords[mask]
+                    tbl_dicom = tbl_dicom[mask]
+
+                self.profile_table.update_data(tbl_coords, tbl_dicom)
 
         except Exception as e:
             # It's better to log errors than to show a message box from here,
@@ -366,7 +401,8 @@ class PlotManager:
                     canvas=self.dicom_canvas, image_data=file_a_data,
                     extent=file_a_extent, title='File A (Top)',
                     colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
-                    line=dm.profile_line
+                    line=dm.profile_line,
+                    view_bounds=dm.file_a_handler.dose_bounds
                 )
         elif dm.dicom_roi:
             # Legacy fallback
@@ -393,11 +429,16 @@ class PlotManager:
                 title_suffix = ''
 
             if file_b_data is not None and file_b_extent is not None:
+                file_b_bounds = dm.file_b_handler.dose_bounds if hasattr(dm.file_b_handler, 'dose_bounds') else None
+                # Fall back to File A's dose_bounds when File B has none
+                if file_b_bounds is None and dm.file_a_handler is not None:
+                    file_b_bounds = dm.file_a_handler.dose_bounds
                 draw_image(
                     canvas=self.mcc_canvas, image_data=file_b_data,
                     extent=file_b_extent, title=f'File B (Bottom){title_suffix}',
                     colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
-                    line=dm.profile_line
+                    line=dm.profile_line,
+                    view_bounds=file_b_bounds
                 )
         elif dm.mcc_roi:
             # Legacy fallback
@@ -486,6 +527,12 @@ class PlotManager:
                 fraction=0.046,
                 pad=0.04
             )
+            # Apply view bounds from File A's dose_bounds
+            if dm.file_a_handler and dm.file_a_handler.dose_bounds:
+                vb = dm.file_a_handler.dose_bounds
+                self.gamma_canvas.axes.set_xlim(vb['min_x'], vb['max_x'])
+                self.gamma_canvas.axes.set_ylim(vb['min_y'], vb['max_y'])
+
             self.gamma_canvas.axes.plot(0, 0, 'wo', markersize=3, markeredgecolor='black')
             if dm.profile_line is not None:
                 if dm.profile_line["type"] == "vertical":

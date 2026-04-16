@@ -137,15 +137,17 @@ class GammaAnalysisApp(QMainWindow):
         # 6. Execution
         run_report_group = QGroupBox("Actions")
         run_report_layout = QVBoxLayout(run_report_group)
+        self.gamma_analysis_btn = QPushButton("Gamma analysis")
         self.generate_report_btn = QPushButton("Generate Report")
         self.auto_analysis_btn = QPushButton("Auto analysis")
         self.clear_data_btn = QPushButton("Clear data")
         self.generate_report_btn.setEnabled(False)
-        for button in (self.vertical_btn, self.horizontal_btn, self.generate_report_btn, self.auto_analysis_btn, self.clear_data_btn, self.close_btn if hasattr(self, "close_btn") else None):
+        for button in (self.vertical_btn, self.horizontal_btn, self.gamma_analysis_btn, self.generate_report_btn, self.auto_analysis_btn, self.clear_data_btn, self.close_btn if hasattr(self, "close_btn") else None):
             if button is not None:
                 button.setMinimumHeight(34)
                 button.setMinimumWidth(max(button.minimumWidth(), 150))
                 button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        run_report_layout.addWidget(self.gamma_analysis_btn)
         run_report_layout.addWidget(self.generate_report_btn)
         run_report_layout.addWidget(self.auto_analysis_btn)
         run_report_layout.addSpacerItem(QSpacerItem(20, 14, QSizePolicy.Minimum, QSizePolicy.Fixed))
@@ -198,6 +200,16 @@ class GammaAnalysisApp(QMainWindow):
         dicom_header_layout.addWidget(self.load_dicom_btn)
         dicom_header_layout.addWidget(self.dicom_label)
         dicom_header_layout.addStretch()
+        self.rotate_a_cw_btn = QPushButton("⟳")
+        self.rotate_a_cw_btn.setObjectName("rotateBtn")
+        self.rotate_a_cw_btn.setToolTip("Rotate File A 90° clockwise")
+        self.rotate_a_cw_btn.setFixedSize(34, 34)
+        self.rotate_a_ccw_btn = QPushButton("⟲")
+        self.rotate_a_ccw_btn.setObjectName("rotateBtn")
+        self.rotate_a_ccw_btn.setToolTip("Rotate File A 90° counter-clockwise")
+        self.rotate_a_ccw_btn.setFixedSize(34, 34)
+        dicom_header_layout.addWidget(self.rotate_a_cw_btn)
+        dicom_header_layout.addWidget(self.rotate_a_ccw_btn)
         
         dicom_container = QWidget()
         dicom_layout = QVBoxLayout(dicom_container)
@@ -260,6 +272,16 @@ class GammaAnalysisApp(QMainWindow):
         mcc_header_layout.addWidget(self.load_measurement_btn)
         mcc_header_layout.addWidget(self.mcc_label)
         mcc_header_layout.addStretch()
+        self.rotate_b_cw_btn = QPushButton("⟳")
+        self.rotate_b_cw_btn.setObjectName("rotateBtn")
+        self.rotate_b_cw_btn.setToolTip("Rotate File B 90° clockwise")
+        self.rotate_b_cw_btn.setFixedSize(34, 34)
+        self.rotate_b_ccw_btn = QPushButton("⟲")
+        self.rotate_b_ccw_btn.setObjectName("rotateBtn")
+        self.rotate_b_ccw_btn.setToolTip("Rotate File B 90° counter-clockwise")
+        self.rotate_b_ccw_btn.setFixedSize(34, 34)
+        mcc_header_layout.addWidget(self.rotate_b_cw_btn)
+        mcc_header_layout.addWidget(self.rotate_b_ccw_btn)
         
         mcc_container = QWidget()
         mcc_layout = QVBoxLayout(mcc_container)
@@ -360,6 +382,7 @@ class GammaAnalysisApp(QMainWindow):
         """Connects all UI widget signals to the controller's methods."""
         self.load_dicom_btn.clicked.connect(self.controller.load_dicom_file)
         self.load_measurement_btn.clicked.connect(self.controller.load_measurement_file)
+        self.gamma_analysis_btn.clicked.connect(self.controller.run_gamma_analysis)
         self.generate_report_btn.clicked.connect(self.controller.generate_report)
         self.auto_analysis_btn.clicked.connect(self.controller.auto_analysis)
         self.clear_data_btn.clicked.connect(self.controller.clear_data)
@@ -376,6 +399,11 @@ class GammaAnalysisApp(QMainWindow):
         self.horizontal_btn.clicked.connect(lambda: self.controller.set_profile_direction("horizontal"))
         self.file_a_norm_spin.valueChanged.connect(lambda value: self.controller.update_normalization("A", value))
         self.file_b_norm_spin.valueChanged.connect(lambda value: self.controller.update_normalization("B", value))
+
+        self.rotate_a_cw_btn.clicked.connect(lambda: self.controller.rotate_data("A", "CW"))
+        self.rotate_a_ccw_btn.clicked.connect(lambda: self.controller.rotate_data("A", "CCW"))
+        self.rotate_b_cw_btn.clicked.connect(lambda: self.controller.rotate_data("B", "CW"))
+        self.rotate_b_ccw_btn.clicked.connect(lambda: self.controller.rotate_data("B", "CCW"))
 
         self.dicom_canvas.mpl_connect('button_press_event', self.controller.on_dicom_click_handler)
         self.mcc_canvas.mpl_connect('button_press_event', self.controller.on_mcc_click_handler)

@@ -25,7 +25,6 @@ class BaseFileHandler:
         self.pixel_spacing_x = 1.0
         self.pixel_spacing_y = 1.0
         self.dose_bounds = None
-        self.crop_pixel_offset = (0, 0)
 
         config = load_app_config()
         self.dta = config["dta"]
@@ -244,46 +243,11 @@ class DicomFileHandler(BaseFileHandler):
 
             self.create_physical_coordinates_dcm()
 
-            # Preserve original data and coordinates
-            full_pixel_data = self.pixel_data
-            full_phys_x_mesh = self.phys_x_mesh
-            full_phys_y_mesh = self.phys_y_mesh
-
-            # Auto-crop ROI to area with >1% of max dose + 2cm margin
+            # Calculate dose bounds as a view window (no cropping)
             self.dose_bounds = self.calculate_dose_bounds(
                 threshold_percent=self.roi_threshold_percent,
                 margin_mm=self.roi_margin,
             )
-
-            if self.dose_bounds:
-                bounds = self.dose_bounds
-                # Convert physical bounds back to pixel coordinates for cropping.
-                # Note: At this point, self.physical_to_pixel_coord returns full-grid pixel coordinates
-                # because self.crop_pixel_offset is (0, 0).
-                min_px_f, py_for_min_y_f = self.physical_to_pixel_coord(bounds['min_x'], bounds['min_y'])
-                max_px_f, py_for_max_y_f = self.physical_to_pixel_coord(bounds['max_x'], bounds['max_y'])
-                min_px = int(round(min_px_f))
-                max_px = int(round(max_px_f))
-                py_for_min_y = int(round(py_for_min_y_f))
-                py_for_max_y = int(round(py_for_max_y_f))
-
-                # Because of y-axis inversion, min physical y corresponds to max pixel y, so we swap.
-                min_py = py_for_max_y
-                max_py = py_for_min_y
-
-                if min_py > max_py: min_py, max_py = max_py, min_py
-                if min_px > max_px: min_px, max_px = max_px, min_px
-
-                h, w = full_pixel_data.shape
-                min_py, max_py = max(0, min_py), min(h, max_py + 1)
-                min_px, max_px = max(0, min_px), min(w, max_px + 1)
-
-                self.pixel_data = full_pixel_data[min_py:max_py, min_px:max_px]
-                self.phys_x_mesh = full_phys_x_mesh[min_py:max_py, min_px:max_px]
-                self.phys_y_mesh = full_phys_y_mesh[min_py:max_py, min_px:max_px]
-                self.crop_pixel_offset = (min_px, min_py)
-                self.physical_extent = [self.phys_x_mesh.min(), self.phys_x_mesh.max(), self.phys_y_mesh.min(), self.phys_y_mesh.max()]
-                logger.info(f"DICOM data has been cropped to ROI. New shape: {self.pixel_data.shape}")
 
             return True, None
 
@@ -294,21 +258,15 @@ class DicomFileHandler(BaseFileHandler):
 
 
     def physical_to_pixel_coord(self, phys_x, phys_y):
-        """Converts physical coordinates (mm) to cropped pixel coordinates."""
-        full_grid_px = phys_x / self.pixel_spacing_x - self.dicom_origin_x
-        full_grid_py = -phys_y / self.pixel_spacing_y - self.dicom_origin_y
-        cropped_px = full_grid_px - self.crop_pixel_offset[0]
-        cropped_py = full_grid_py - self.crop_pixel_offset[1]
-
-        return cropped_px, cropped_py
+        """Converts physical coordinates (mm) to pixel coordinates."""
+        px = phys_x / self.pixel_spacing_x - self.dicom_origin_x
+        py = -phys_y / self.pixel_spacing_y - self.dicom_origin_y
+        return px, py
 
     def pixel_to_physical_coord(self, pixel_x, pixel_y):
-        """Converts cropped pixel coordinates to physical coordinates (mm)."""
-        full_grid_px = pixel_x + self.crop_pixel_offset[0]
-        full_grid_py = pixel_y + self.crop_pixel_offset[1]
-
-        phys_x = (full_grid_px + self.dicom_origin_x) * self.pixel_spacing_x
-        phys_y = (full_grid_py + self.dicom_origin_y) * -self.pixel_spacing_y
+        """Converts pixel coordinates to physical coordinates (mm)."""
+        phys_x = (pixel_x + self.dicom_origin_x) * self.pixel_spacing_x
+        phys_y = (pixel_y + self.dicom_origin_y) * -self.pixel_spacing_y
         return phys_x, phys_y
 
     def get_origin_coords(self):
@@ -329,42 +287,6 @@ class DicomFileHandler(BaseFileHandler):
         patient_name = self.dicom_data.get("PatientName", "N/A")
 
         return institution, patient_id, patient_name
-
-    def crop_to_bounds(self, bounds):
-        """Crops DICOM data to the requested physical bounds."""
-        if self.pixel_data is None or bounds is None:
-            return
-
-        full_pixel_data = self.pixel_data
-        full_phys_x_mesh = self.phys_x_mesh
-        full_phys_y_mesh = self.phys_y_mesh
-
-        min_px_f, py_for_min_y_f = self.physical_to_pixel_coord(bounds['min_x'], bounds['min_y'])
-        max_px_f, py_for_max_y_f = self.physical_to_pixel_coord(bounds['max_x'], bounds['max_y'])
-        min_px = int(round(min_px_f))
-        max_px = int(round(max_px_f))
-        py_for_min_y = int(round(py_for_min_y_f))
-        py_for_max_y = int(round(py_for_max_y_f))
-
-        min_py = py_for_max_y
-        max_py = py_for_min_y
-
-        if min_py > max_py:
-            min_py, max_py = max_py, min_py
-        if min_px > max_px:
-            min_px, max_px = max_px, min_px
-
-        h, w = full_pixel_data.shape
-        min_py, max_py = max(0, min_py), min(h, max_py + 1)
-        min_px, max_px = max(0, min_px), min(w, max_px + 1)
-
-        self.pixel_data = full_pixel_data[min_py:max_py, min_px:max_px]
-        self.phys_x_mesh = full_phys_x_mesh[min_py:max_py, min_px:max_px]
-        self.phys_y_mesh = full_phys_y_mesh[min_py:max_py, min_px:max_px]
-        self.crop_pixel_offset = (self.crop_pixel_offset[0] + min_px, self.crop_pixel_offset[1] + min_py)
-        self.physical_extent = [self.phys_x_mesh.min(), self.phys_x_mesh.max(), self.phys_y_mesh.min(), self.phys_y_mesh.max()]
-        self.dose_bounds = bounds
-        logger.info(f"DICOM data has been cropped to requested bounds. New shape: {self.pixel_data.shape}")
 
     def create_physical_coordinates_dcm(self):
         """Creates physical coordinate meshes based on DICOM metadata."""
@@ -466,38 +388,6 @@ class MCCFileHandler(BaseFileHandler):
             error_msg = f"File open error: {str(e)}"
             logger.error(error_msg)
             return False, error_msg
-
-    def crop_to_bounds(self, bounds):
-        """
-        Crops the MCC data based on physical coordinate bounds from DICOM.
-        """
-        if self.matrix_data is None or bounds is None:
-            return
-
-        full_matrix_data = self.matrix_data
-        full_phys_x_mesh = self.phys_x_mesh
-        full_phys_y_mesh = self.phys_y_mesh
-
-        min_px, max_py_from_min_y = self.physical_to_pixel_coord(bounds['min_x'], bounds['min_y'])
-        max_px, min_py_from_max_y = self.physical_to_pixel_coord(bounds['max_x'], bounds['max_y'])
-
-        min_py, max_py = min_py_from_max_y, max_py_from_min_y
-
-        if min_py > max_py: min_py, max_py = max_py, min_py
-        if min_px > max_px: min_px, max_px = max_px, min_px
-
-        h, w = full_matrix_data.shape
-        min_py, max_py = max(0, min_py), min(h, max_py + 1)
-        min_px, max_px = max(0, min_px), min(w, max_px + 1)
-
-        self.matrix_data = full_matrix_data[min_py:max_py, min_px:max_px]
-        self.pixel_data = self.matrix_data
-        self.phys_x_mesh = full_phys_x_mesh[min_py:max_py, min_px:max_px]
-        self.phys_y_mesh = full_phys_y_mesh[min_py:max_py, min_px:max_px]
-        self.crop_pixel_offset = (min_px, min_py)
-        self.physical_extent = [self.phys_x_mesh.min(), self.phys_x_mesh.max(), self.phys_y_mesh.min(), self.phys_y_mesh.max()]
-
-        logger.info(f"MCC data has been cropped to DICOM ROI. New shape: {self.matrix_data.shape}")
 
     def _set_device_parameters(self):
         """Sets the origin and spacing parameters based on the detected device type."""
@@ -614,23 +504,13 @@ class MCCFileHandler(BaseFileHandler):
         self.physical_extent = [phys_x.min(), phys_x.max(), phys_y.min(), phys_y.max()]
 
     def physical_to_pixel_coord(self, phys_x, phys_y):
-        """Converts physical coordinates (mm) to cropped pixel coordinates."""
-        full_grid_px = phys_x / self.mcc_spacing_x + self.mcc_origin_x
-        full_grid_py = -phys_y / self.mcc_spacing_y + self.mcc_origin_y
-
-        cropped_px = int(round(full_grid_px - self.crop_pixel_offset[0]))
-        cropped_py = int(round(full_grid_py - self.crop_pixel_offset[1]))
-
-        return cropped_px, cropped_py
+        """Converts physical coordinates (mm) to pixel coordinates."""
+        px = int(round(phys_x / self.mcc_spacing_x + self.mcc_origin_x))
+        py = int(round(-phys_y / self.mcc_spacing_y + self.mcc_origin_y))
+        return px, py
 
     def pixel_to_physical_coord(self, pixel_x, pixel_y):
-        """Converts cropped pixel coordinates to physical coordinates (mm)."""
-        full_grid_px = pixel_x + self.crop_pixel_offset[0]
-        full_grid_py = pixel_y + self.crop_pixel_offset[1]
-
-        phys_x = (full_grid_px - self.mcc_origin_x) * self.mcc_spacing_x
-        # Y축 음수 부호: matrix_data flipud 후 create_physical_coordinates_mcc()의 음수와 일치시킴
-        # py=0 (flipud 후 위쪽) → phys_y = -(0-26)*5 = 130 (y_max)
-        # py=26 (flipud 후 아래쪽) → phys_y = -(26-26)*5 = -130 (y_min)
-        phys_y = -(full_grid_py - self.mcc_origin_y) * self.mcc_spacing_y
+        """Converts pixel coordinates to physical coordinates (mm)."""
+        phys_x = (pixel_x - self.mcc_origin_x) * self.mcc_spacing_x
+        phys_y = -(pixel_y - self.mcc_origin_y) * self.mcc_spacing_y
         return phys_x, phys_y

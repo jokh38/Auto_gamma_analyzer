@@ -209,6 +209,13 @@ class AppController:
             min_y + delta_y_mm,
             max_y + delta_y_mm,
         ]
+        if handler.dose_bounds is not None:
+            handler.dose_bounds = {
+                'min_x': handler.dose_bounds['min_x'] + delta_x_mm,
+                'max_x': handler.dose_bounds['max_x'] + delta_x_mm,
+                'min_y': handler.dose_bounds['min_y'] + delta_y_mm,
+                'max_y': handler.dose_bounds['max_y'] + delta_y_mm,
+            }
 
     def _create_handler_for_path(self, filename):
         """Load a file into the correct handler without touching the visible UI state."""
@@ -242,9 +249,6 @@ class AppController:
             float(self.main_view.dicom_x_spin.value()),
             float(self.main_view.dicom_y_spin.value()),
         )
-
-        if file_a_handler.dose_bounds and hasattr(file_b_handler, "crop_to_bounds"):
-            file_b_handler.crop_to_bounds(file_a_handler.dose_bounds)
 
         return file_a_handler, file_b_handler
 
@@ -376,6 +380,7 @@ class AppController:
         dm.initial_dicom_origin_mm = None
         dm.initial_dicom_handler_meshes = None
         dm.initial_dicom_handler_extent = None
+        dm.initial_dicom_dose_bounds = None
         dm.profile_line = None
         dm.current_profile_data = None
 
@@ -387,6 +392,63 @@ class AppController:
         self.main_view.device_label.setText("Device Type: Not detected")
         self.main_view.dicom_x_spin.setValue(0.0)
         self.main_view.dicom_y_spin.setValue(0.0)
+
+    def rotate_data(self, side, direction):
+        """Rotate dose data 90 degrees. side='A'|'B', direction='CW'|'CCW'."""
+        dm = self.data_manager
+        if side == "A":
+            handler = dm.file_a_handler or dm.dicom_handler
+        else:
+            handler = dm.file_b_handler or dm.mcc_handler
+
+        if handler is None or handler.pixel_data is None:
+            return
+
+        # np.rot90 rotates CCW by default; k=1 is CCW, k=3 is CW
+        k = 3 if direction == "CW" else 1
+        handler.pixel_data = np.rot90(handler.pixel_data, k=k)
+
+        # Also rotate matrix_data for MCC handlers
+        if hasattr(handler, 'matrix_data') and handler.matrix_data is not None:
+            handler.matrix_data = np.rot90(handler.matrix_data, k=k)
+
+        # Clear cached interpolation data so the display uses the rotated data
+        dm.mcc_interp_data = None
+
+        # Swap physical extent: [xmin, xmax, ymin, ymax]
+        if handler.physical_extent is not None:
+            xmin, xmax, ymin, ymax = handler.physical_extent
+            if direction == "CW":
+                handler.physical_extent = [ymin, ymax, -xmax, -xmin]
+            else:
+                handler.physical_extent = [-ymax, -ymin, xmin, xmax]
+
+        # Rotate coordinate meshes if present
+        if handler.phys_x_mesh is not None and handler.phys_y_mesh is not None:
+            old_x = handler.phys_x_mesh
+            old_y = handler.phys_y_mesh
+            if direction == "CW":
+                handler.phys_x_mesh = np.rot90(old_y, k=k)
+                handler.phys_y_mesh = np.rot90(-old_x, k=k)
+            else:
+                handler.phys_x_mesh = np.rot90(-old_y, k=k)
+                handler.phys_y_mesh = np.rot90(old_x, k=k)
+
+        # Rotate dose_bounds coordinates
+        if handler.dose_bounds is not None:
+            b = handler.dose_bounds
+            if direction == "CW":
+                handler.dose_bounds = {
+                    'min_x': b['min_y'], 'max_x': b['max_y'],
+                    'min_y': -b['max_x'], 'max_y': -b['min_x'],
+                }
+            else:
+                handler.dose_bounds = {
+                    'min_x': -b['max_y'], 'max_x': -b['min_y'],
+                    'min_y': b['min_x'], 'max_y': b['max_x'],
+                }
+
+        self.plot_manager.redraw_all_images()
 
     def _can_run_gamma_analysis(self):
         """Returns whether both files needed for gamma analysis are available."""
@@ -420,7 +482,6 @@ class AppController:
         self.plot_manager.redraw_all_images()
         if dm.profile_line is not None:
             self.generate_and_draw_profile()
-        self._auto_run_gamma_analysis_if_ready()
 
     def _apply_dicom_shift(self, delta_x_mm, delta_y_mm):
         """Applies a relative physical shift to the loaded DICOM datasets."""
@@ -445,6 +506,14 @@ class AppController:
                 min_y + delta_y_mm,
                 max_y + delta_y_mm,
             ]
+            if hasattr(dm, 'initial_dicom_dose_bounds') and dm.initial_dicom_dose_bounds is not None:
+                b = dm.initial_dicom_dose_bounds
+                dm.dicom_handler.dose_bounds = {
+                    'min_x': b['min_x'] + delta_x_mm,
+                    'max_x': b['max_x'] + delta_x_mm,
+                    'min_y': b['min_y'] + delta_y_mm,
+                    'max_y': b['max_y'] + delta_y_mm,
+                }
 
     def run_gamma_analysis(self):
         """
@@ -609,6 +678,7 @@ class AppController:
                     handler.phys_y_mesh.copy(),
                 )
                 self.data_manager.initial_dicom_handler_extent = list(handler.get_physical_extent())
+                self.data_manager.initial_dicom_dose_bounds = dict(handler.dose_bounds) if handler.dose_bounds else None
                 pos_x, _, pos_z = dicom_data.metadata['image_position_patient']
                 spacing_x, spacing_y = dicom_data.metadata['pixel_spacing']
                 self.data_manager.initial_dicom_origin_mm = (float(pos_x), float(pos_z))
@@ -631,7 +701,6 @@ class AppController:
             # Auto-generate profile if both files are loaded
             if self.data_manager.file_b_handler is not None:
                 self.set_default_profile_and_generate()
-                self._auto_run_gamma_analysis_if_ready()
 
         except Exception as e:
             QMessageBox.critical(self.main_view, "Error", f"Failed to load File A: {e}")
@@ -685,11 +754,6 @@ class AppController:
             self.data_manager.file_b_handler = handler
             self._apply_handler_normalization(handler, self.data_manager.file_b_normalization)
 
-            # Crop to match File A bounds when the File B handler supports it.
-            if self.data_manager.file_a_handler and hasattr(self.data_manager.file_a_handler, 'dose_bounds'):
-                if self.data_manager.file_a_handler.dose_bounds and hasattr(handler, 'crop_to_bounds'):
-                    handler.crop_to_bounds(self.data_manager.file_a_handler.dose_bounds)
-
             # For backward compatibility with existing code
             # Use load_mcc() as the primary loader for standardized data processing
             if file_type == "MCC":
@@ -709,7 +773,6 @@ class AppController:
             # Auto-generate profile if both files are loaded
             if self.data_manager.file_a_handler is not None:
                 self.set_default_profile_and_generate()
-                self._auto_run_gamma_analysis_if_ready()
 
         except Exception as e:
             QMessageBox.critical(self.main_view, "Error", f"Failed to load File B: {e}")
@@ -736,11 +799,10 @@ class AppController:
         self.plot_manager.redraw_all_images()
         if dm.profile_line is not None:
             self.generate_and_draw_profile()
-        self._auto_run_gamma_analysis_if_ready()
 
     def update_gamma_parameters(self):
         """Refresh gamma analysis after any criterion change."""
-        self._auto_run_gamma_analysis_if_ready()
+        pass
 
     def update_suppression_level(self):
         """Persist the dose suppression level and refresh gamma analysis."""
@@ -765,7 +827,7 @@ class AppController:
             if handler is not None and hasattr(handler, "suppression_level"):
                 handler.suppression_level = new_value
 
-        self._auto_run_gamma_analysis_if_ready()
+        pass
 
     def set_profile_direction(self, direction):
         self.main_view.profile_direction = direction

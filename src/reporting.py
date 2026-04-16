@@ -211,6 +211,13 @@ def _draw_footer(fig, gs_slot):
 
 # ── Main entry point ──────────────────────────────────────────────────
 
+def _apply_view_bounds(ax, view_bounds):
+    """Apply dose_bounds view limits to a matplotlib axis."""
+    if view_bounds is not None:
+        ax.set_xlim(view_bounds['min_x'], view_bounds['max_x'])
+        ax.set_ylim(view_bounds['min_y'], view_bounds['max_y'])
+
+
 def generate_report(
     output_path,
     dicom_handler,
@@ -264,6 +271,7 @@ def generate_report(
     # ── Row 1: Dose distributions ─────────────────────────────────────
     dicom_data = dicom_handler.get_pixel_data()
     dicom_extent = dicom_handler.get_physical_extent()
+    view_bounds = dicom_handler.dose_bounds if hasattr(dicom_handler, 'dose_bounds') else None
 
     ax_dicom = fig.add_subplot(gs[1, 0])
     if dicom_data is not None and dicom_extent is not None:
@@ -272,6 +280,7 @@ def generate_report(
         cb = fig.colorbar(im, ax=ax_dicom, label='Dose (Gy)', pad=0.02,
                           shrink=0.92)
         _style_report_colorbar(cb)
+    _apply_view_bounds(ax_dicom, view_bounds)
     ax_dicom.set_title('DICOM RT Dose', fontsize=13, weight='bold', pad=8)
     ax_dicom.set_xlabel('Position (mm)', fontsize=11)
     ax_dicom.set_ylabel('Position (mm)', fontsize=11)
@@ -285,6 +294,7 @@ def generate_report(
         cb = fig.colorbar(im, ax=ax_mcc, label='Dose (Gy)', pad=0.02,
                           shrink=0.92)
         _style_report_colorbar(cb)
+    _apply_view_bounds(ax_mcc, view_bounds)
     ax_mcc.set_title('MCC Dose (Interpolated)', fontsize=13, weight='bold', pad=8)
     ax_mcc.set_xlabel('Position (mm)', fontsize=11)
     ax_mcc.set_ylabel('Position (mm)', fontsize=11)
@@ -309,6 +319,8 @@ def generate_report(
         legend = ax_hprof.legend(fontsize=9, loc='upper right')
         _style_report_legend(legend)
         ax_hprof.grid(True, alpha=0.25, linestyle='--')
+        if view_bounds is not None:
+            ax_hprof.set_xlim(view_bounds['min_x'], view_bounds['max_x'])
     _style_report_axis(ax_hprof)
 
     ax_vprof = fig.add_subplot(gs[2, 1])
@@ -328,6 +340,8 @@ def generate_report(
         legend = ax_vprof.legend(fontsize=9, loc='upper right')
         _style_report_legend(legend)
         ax_vprof.grid(True, alpha=0.25, linestyle='--')
+        if view_bounds is not None:
+            ax_vprof.set_xlim(view_bounds['min_y'], view_bounds['max_y'])
     _style_report_axis(ax_vprof)
 
     # ── Row 3: Gamma map (left) | Pass-rate badge (right) ────────────
@@ -362,6 +376,7 @@ def generate_report(
                               extend='max', shrink=0.92)
             _style_report_colorbar(cb)
 
+    _apply_view_bounds(ax_gamma, view_bounds)
     ax_gamma.set_title(f'Gamma Analysis ({dd:g}%/{dta:g}mm)',
                        fontsize=13, weight='bold', pad=8)
     ax_gamma.set_xlabel('Position (mm)', fontsize=11)
@@ -392,6 +407,7 @@ def generate_report(
             cb = fig.colorbar(im, ax=ax_dd, label='DD (%)', pad=0.03,
                               extend='both', shrink=0.85)
             _style_report_colorbar(cb)
+    _apply_view_bounds(ax_dd, view_bounds)
     ax_dd.set_title('DD Map', fontsize=11, weight='bold', pad=6)
     ax_dd.set_xlabel('Position (mm)', fontsize=9)
     ax_dd.set_ylabel('Position (mm)', fontsize=9)
@@ -414,6 +430,7 @@ def generate_report(
             cb = fig.colorbar(im, ax=ax_dta, label='DTA (mm)', pad=0.03,
                               extend='max', shrink=0.85)
             _style_report_colorbar(cb)
+    _apply_view_bounds(ax_dta, view_bounds)
     ax_dta.set_title('DTA Map', fontsize=11, weight='bold', pad=6)
     ax_dta.set_xlabel('Position (mm)', fontsize=9)
     ax_dta.set_ylabel('Position (mm)', fontsize=9)

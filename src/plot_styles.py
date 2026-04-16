@@ -13,7 +13,7 @@ def get_gamma_colormap():
             (1.0, "#b40426"),
         ],
     )
-    cmap.set_bad(color="#ffffff")
+    cmap.set_bad(color="#000000")
     return cmap
 
 

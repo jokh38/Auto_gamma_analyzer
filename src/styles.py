@@ -82,6 +82,12 @@ QPushButton#loadBtn:pressed {
     background-color: #1f2c36;
 }
 
+QPushButton#rotateBtn {
+    font-size: 18px;
+    padding: 0px;
+    min-height: 0px;
+}
+
 QPushButton#closeBtn {
     background-color: #3c2a2a;
     border: 1px solid #a34f4f;

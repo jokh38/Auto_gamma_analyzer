@@ -30,6 +30,7 @@ class DataManager:
         self.initial_dicom_origin_mm: Optional[Tuple[float, float]] = None
         self.initial_dicom_handler_meshes: Optional[Tuple[np.ndarray, np.ndarray]] = None
         self.initial_dicom_handler_extent: Optional[List[float]] = None
+        self.initial_dicom_dose_bounds: Optional[Dict[str, float]] = None
 
         # Profile-related data
         self.profile_line: Optional[Dict[str, Any]] = None
