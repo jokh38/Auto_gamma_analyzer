@@ -106,6 +106,23 @@ QPushButton#closeBtn:pressed {
     background-color: #2c1f1f;
 }
 
+QPushButton#tabBtn {
+    background-color: #1e2227;
+    border: 1px solid #2c313a;
+    color: #e0e0e0;
+}
+
+QPushButton#tabBtn:hover {
+    background-color: #2a3036;
+    border-color: #4fa3d1;
+}
+
+QPushButton#tabBtn:checked {
+    background-color: #4fa3d1;
+    color: #ffffff;
+    font-weight: bold;
+}
+
 /* Inputs */
 QSpinBox, QDoubleSpinBox, QComboBox {
     background-color: #1e1e1e;

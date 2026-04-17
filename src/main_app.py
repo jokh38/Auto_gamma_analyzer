@@ -69,7 +69,10 @@ class GammaAnalysisApp(QMainWindow):
         sidebar.setMinimumWidth(340)
         sidebar.setMaximumWidth(420)
         sidebar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        sidebar.setStyleSheet("background-color: #252526; border-right: 1px solid #333;")
+        sidebar.setStyleSheet("""
+            QFrame { background-color: #1e2227; border-right: 1px solid #2c313a; }
+            QGroupBox { background: transparent; border: 1px solid #2c313a; }
+        """)
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(15, 15, 15, 15)
         sidebar_layout.setSpacing(15)
@@ -100,9 +103,11 @@ class GammaAnalysisApp(QMainWindow):
         profile_dir_group = QGroupBox("Profile Direction")
         profile_dir_layout = QHBoxLayout(profile_dir_group)
         self.vertical_btn = QPushButton("Vertical")
+        self.vertical_btn.setObjectName("tabBtn")
         self.vertical_btn.setCheckable(True)
         self.vertical_btn.setChecked(True)
         self.horizontal_btn = QPushButton("Horizontal")
+        self.horizontal_btn.setObjectName("tabBtn")
         self.horizontal_btn.setCheckable(True)
         profile_dir_layout.addWidget(self.vertical_btn)
         profile_dir_layout.addWidget(self.horizontal_btn)

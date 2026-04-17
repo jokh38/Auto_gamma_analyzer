@@ -294,6 +294,16 @@ class DicomFileHandler(BaseFileHandler):
         height, width = self.pixel_data.shape
         phys_x = (np.arange(width) + self.dicom_origin_x) * self.pixel_spacing_x
         phys_y = (np.arange(height) + self.dicom_origin_y) * -self.pixel_spacing_y
+        
+        # The dicom file origin 0.5 should be displayed as 0. Set 0.5 as 0 only for dicom file.
+        min_x_idx = np.argmin(np.abs(phys_x))
+        if np.isclose(np.abs(phys_x[min_x_idx]), 0.5):
+            phys_x -= phys_x[min_x_idx]
+            
+        min_y_idx = np.argmin(np.abs(phys_y))
+        if np.isclose(np.abs(phys_y[min_y_idx]), 0.5):
+            phys_y -= phys_y[min_y_idx]
+            
         self.phys_x_mesh, self.phys_y_mesh = np.meshgrid(phys_x, phys_y)
         # physical_extent의 y축 순서를 min, max로 표준화합니다.
         self.physical_extent = [phys_x.min(), phys_x.max(), phys_y.min(), phys_y.max()]
