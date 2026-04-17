@@ -9,7 +9,7 @@ build_venv\Scripts\activate
 pip install numpy scipy matplotlib PyQt5 pydicom PyYAML pyinstaller
 
 # 2. Build
-build_venv\Scripts\pyinstaller.exe AutoGammaAnalyzer.spec --noconfirm
+build_venv\Scripts\pyinstaller.exe --clean --noconfirm AutoGammaAnalyzer.spec
 
 # 3. Verify
 Get-Item dist\AutoGammaAnalyzer.exe | Select-Object Name, @{N='Size (MB)';E={[math]::Round($_.Length/1MB, 1)}}
@@ -28,7 +28,7 @@ The global Python environment has torch (~2 GB), cupy, transformers, scikit-lear
 | Build Environment | EXE Size | Notes |
 |---|---|---|
 | Global (dirty, with torch/cupy/etc.) | **1,078 MB** | Binary DLLs leak in despite excludes |
-| Clean venv (only 7 packages) | **~90 MB** | 93% reduction, no code changes |
+| Clean venv (only 7 packages) | **~91 MB** | 92% reduction, no code changes |
 
 **Always build in a clean venv.** This is the single highest-impact action.
 
@@ -46,6 +46,15 @@ The global Python environment has torch (~2 GB), cupy, transformers, scikit-lear
 | PyQt5 | GUI framework | main_app.py, ui_components.py, app_controller.py |
 | pydicom | DICOM RT dose file loading | load_dcm.py, app_controller.py, file_handlers.py |
 | PyYAML | config.yaml parsing | utils.py, analysis.py, file_handlers.py, load_mcc.py |
+| PyInstaller | Build tool (not a runtime dep) | — |
+
+### Version tested
+
+| Package | Version |
+|---------|---------|
+| Python | 3.12.4 |
+| PyInstaller | 6.19.0 |
+| Platform | Windows 11 (10.0.26200) |
 
 ### Not required (not imported in src/)
 
@@ -82,8 +91,8 @@ Required because some imports cannot be discovered statically:
 ```python
 hiddenimports=[
     'PyQt5.sip',                              # PyQt5 C binding
-    'pydicom.encoders.gdcm',                   # Optional DICOM codec (may not be found)
-    'pydicom.encoders.pylibjpeg',              # Optional DICOM codec (may not be found)
+    'pydicom.encoders.gdcm',                   # Optional DICOM codec — WARNING if not found (safe to ignore)
+    'pydicom.encoders.pylibjpeg',              # Optional DICOM codec — WARNING if not found (safe to ignore)
     'scipy.special._ufuncs_cxx',               # scipy compiled extension
     'scipy.linalg.cython_blas',                # BLAS interface
     'scipy.linalg.cython_lapack',              # LAPACK interface
@@ -220,6 +229,18 @@ PermissionError: [WinError 5] Access is denied: 'dist\AutoGammaAnalyzer.exe'
 
 Close the app before rebuilding, or kill it: `Stop-Process -Name AutoGammaAnalyzer -Force`
 
+### 5.5 Safe-to-ignore build warnings
+
+The following warnings appear during analysis but are harmless — the missing packages are optional codecs not needed for core DICOM functionality:
+
+```
+ERROR: Hidden import 'pydicom.encoders.gdcm' not found
+ERROR: Hidden import 'pydicom.encoders.pylibjpeg' not found
+WARNING: Hidden import "scipy.special._cdflib" not found!
+```
+
+These entries are kept in `hiddenimports` so the build succeeds automatically if the packages are later installed.
+
 ---
 
 ## 6. config.yaml
@@ -235,12 +256,12 @@ Current config:
 ```yaml
 dta: 2
 dd: 2
-suppression_level: 10
+suppression_level: 5
 roi_margin: 5
 save_csv: false
 csv_export_path: "csv_exports"
 interpolation_method: "cubic"
-smoothing_factor: 1.0
+smoothing_factor: 0
 fill_value_type: "zero"
 mcc_interpolation_method: "cubic"
 mcc_fill_value_type: "zero"
@@ -293,5 +314,5 @@ Before building, verify:
 - [ ] `src/` directory exists with all modules
 - [ ] No torch/cupy/transformers in `pip list`
 - [ ] Previous exe is not running
-- [ ] Build command: `build_venv\Scripts\pyinstaller.exe AutoGammaAnalyzer.spec --noconfirm`
-- [ ] Expected output: `dist\AutoGammaAnalyzer.exe` (~90 MB)
+- [ ] Build command: `build_venv\Scripts\pyinstaller.exe --clean --noconfirm AutoGammaAnalyzer.spec`
+- [ ] Expected output: `dist\AutoGammaAnalyzer.exe` (~91 MB)
