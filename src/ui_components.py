@@ -53,13 +53,13 @@ class ProfileDataTable(QTableWidget):
     """프로파일 데이터 표시용 테이블 위젯"""
     def __init__(self, parent=None):
         super(ProfileDataTable, self).__init__(parent)
-        self.setColumnCount(4)
-        self.setHorizontalHeaderLabels(['Position (mm)', 'A (cGy)', 'B (cGy)', 'Gamma'])
+        self.setColumnCount(5)
+        self.setHorizontalHeaderLabels(['Position (mm)', 'A (cGy)', 'B (cGy)', 'DD (%)', 'Gamma'])
         self.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
     def set_profile_direction(self, direction):
         axis_label = "Y(mm)" if direction == "vertical" else "X(mm)"
-        self.setHorizontalHeaderLabels([axis_label, 'A (cGy)', 'B (cGy)', 'Gamma'])
+        self.setHorizontalHeaderLabels([axis_label, 'A (cGy)', 'B (cGy)', 'DD (%)', 'Gamma'])
         
     def update_data(self, positions, dose_values, measurement_values=None, gamma_values=None):
         if measurement_values is None or len(measurement_values) == 0:
@@ -77,9 +77,13 @@ class ProfileDataTable(QTableWidget):
                 item_na.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.setItem(i, 2, item_na)
 
+                item_dd = QTableWidgetItem("N/A")
+                item_dd.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.setItem(i, 3, item_dd)
+
                 item_gamma = QTableWidgetItem("N/A")
                 item_gamma.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.setItem(i, 3, item_gamma)
+                self.setItem(i, 4, item_gamma)
         else:
             valid_indices = ~np.isnan(measurement_values)
             valid_positions = positions[valid_indices]
@@ -107,6 +111,20 @@ class ProfileDataTable(QTableWidget):
                 item_meas.setForeground(QColor("#22c55e"))
                 self.setItem(i, 2, item_meas)
 
+                # Dose difference: ((B - A) / A) * 100
+                dose_cgy = dose * 100
+                meas_cgy = meas * 100
+                if np.isfinite(dose_cgy) and np.isfinite(meas_cgy) and abs(dose_cgy) > 1e-9:
+                    dd_pct = ((meas_cgy - dose_cgy) / dose_cgy) * 100.0
+                    dd_text = f"{dd_pct:.2f}"
+                else:
+                    dd_text = "N/A"
+                item_dd = QTableWidgetItem(dd_text)
+                item_dd.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if dd_text != "N/A" and abs(float(dd_text)) > 3.0:
+                    item_dd.setForeground(QColor("#f59e0b"))
+                self.setItem(i, 3, item_dd)
+
                 gamma_text = "N/A"
                 if valid_gamma is not None and i < len(valid_gamma) and np.isfinite(valid_gamma[i]):
                     gamma_text = f"{valid_gamma[i]:.3f}"
@@ -115,7 +133,7 @@ class ProfileDataTable(QTableWidget):
                 item_gamma.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 if valid_gamma is not None and i < len(valid_gamma) and np.isfinite(valid_gamma[i]) and valid_gamma[i] > 1.0:
                     item_gamma.setForeground(QColor("#ef4444"))
-                self.setItem(i, 3, item_gamma)
+                self.setItem(i, 4, item_gamma)
 
 
 def draw_image(canvas, image_data, extent, title, colorbar_label=None,
@@ -397,9 +415,11 @@ class PlotManager:
             file_a_data = dm.file_a_handler.get_pixel_data()
             file_a_extent = dm.file_a_handler.get_physical_extent()
             if file_a_data is not None and file_a_extent is not None:
+                file_a_name = dm.file_a_handler.get_filename() or ''
+                file_a_title = f'File A: {file_a_name}' if file_a_name else 'File A'
                 draw_image(
                     canvas=self.dicom_canvas, image_data=file_a_data,
-                    extent=file_a_extent, title='File A (Top)',
+                    extent=file_a_extent, title=file_a_title,
                     colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
                     line=dm.profile_line,
                     view_bounds=dm.file_a_handler.dose_bounds
@@ -408,7 +428,7 @@ class PlotManager:
             # Legacy fallback
             draw_image(
                 canvas=self.dicom_canvas, image_data=dm.dicom_roi.dose_grid,
-                extent=dm.dicom_roi.physical_extent, title='File A (Top)',
+                extent=dm.dicom_roi.physical_extent, title='File A',
                 colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
                 line=dm.profile_line
             )
@@ -433,9 +453,11 @@ class PlotManager:
                 # Fall back to File A's dose_bounds when File B has none
                 if file_b_bounds is None and dm.file_a_handler is not None:
                     file_b_bounds = dm.file_a_handler.dose_bounds
+                file_b_name = dm.file_b_handler.get_filename() or ''
+                file_b_title = f'File B: {file_b_name}{title_suffix}' if file_b_name else f'File B{title_suffix}'
                 draw_image(
                     canvas=self.mcc_canvas, image_data=file_b_data,
-                    extent=file_b_extent, title=f'File B (Bottom){title_suffix}',
+                    extent=file_b_extent, title=file_b_title,
                     colorbar_label='Dose (Gy)', show_origin=True, show_colorbar=True,
                     line=dm.profile_line,
                     view_bounds=file_b_bounds
@@ -444,7 +466,7 @@ class PlotManager:
             # Legacy fallback
             draw_image(
                 canvas=self.mcc_canvas, image_data=dm.mcc_roi.dose_grid,
-                extent=dm.mcc_roi.physical_extent, title='File B (Bottom)',
+                extent=dm.mcc_roi.physical_extent, title='File B',
                 colorbar_label='Dose', show_origin=True, show_colorbar=True,
                 line=dm.profile_line
             )
@@ -456,7 +478,7 @@ class PlotManager:
         if self.dicom_canvas is not None:
             self.dicom_canvas.fig.clear()
             self.dicom_canvas.axes = self.dicom_canvas.fig.add_subplot(111)
-            self.dicom_canvas.axes.set_title("File A (Top)")
+            self.dicom_canvas.axes.set_title("File A")
             self.dicom_canvas.axes.set_aspect('equal', adjustable='box')
             self.dicom_canvas.axes.set_xticks([])
             self.dicom_canvas.axes.set_yticks([])
@@ -466,7 +488,7 @@ class PlotManager:
         if self.mcc_canvas is not None:
             self.mcc_canvas.fig.clear()
             self.mcc_canvas.axes = self.mcc_canvas.fig.add_subplot(111)
-            self.mcc_canvas.axes.set_title("File B (Bottom)")
+            self.mcc_canvas.axes.set_title("File B")
             self.mcc_canvas.axes.set_aspect('equal', adjustable='box')
             self.mcc_canvas.axes.set_xticks([])
             self.mcc_canvas.axes.set_yticks([])
